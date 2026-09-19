@@ -1,0 +1,113 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  /* TradingView-inspired Dark Theme */
+  :root, [data-theme="dark"] {
+    /* Base background: very dark, almost black */
+    --background: 224 30% 7%; 
+    /* Text foreground: #d1d4dc */
+    --foreground: 223 10% 84%;
+    
+    /* Card background: slightly lighter for contrast */
+    --card: 224 20% 11%;
+    --card-foreground: 223 10% 84%;
+    
+    --popover: 224 20% 15%;
+    --popover-foreground: 223 10% 84%;
+    
+    /* Primary (Blue): #2962ff */
+    --primary: 224 100% 58%; 
+    --primary-foreground: 0 0% 100%;
+    
+    /* Secondary elements */
+    --secondary: 224 15% 19%;
+    --secondary-foreground: 223 10% 84%;
+    
+    /* Muted text: #787b86 */
+    --muted: 224 15% 19%;
+    --muted-foreground: 227 6% 50%;
+    
+    --accent: 224 15% 19%;
+    --accent-foreground: 223 10% 84%;
+    
+    --destructive: 355 89% 58%;
+    --destructive-foreground: 0 0% 100%;
+    
+    /* Borders and separators: #2a2e39 */
+    --border: 224 15% 19%;
+    --input: 224 15% 19%;
+    --ring: 224 100% 58%;
+    --radius: 0.375rem; /* Standard subtle rounding */
+
+    /* TradingView Candlestick Colors */
+    --success: 170 90% 32%; /* #089981 */
+    --danger: 355 89% 58%;  /* #f23645 */
+  }
+
+  /* Light Theme */
+  [data-theme="light"] {
+    --background: 0 0% 100%; 
+    --foreground: 222 47% 11%;
+    
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
+    
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    
+    --primary: 224 100% 58%; 
+    --primary-foreground: 0 0% 100%;
+    
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222 47% 11%;
+    
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222 47% 11%;
+    
+    --destructive: 355 89% 58%;
+    --destructive-foreground: 0 0% 100%;
+    
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 224 100% 58%;
+    --radius: 0.375rem;
+
+    --success: 170 90% 32%;
+    --danger: 355 89% 58%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground transition-colors duration-300;
+  }
+}
+
+/* Glassmorphism class overrides */
+.glass-panel {
+  @apply bg-card/65 border border-border/80 backdrop-blur-xl shadow-lg transition-all duration-300;
+}
+
+/* Slick Custom scrollbars matching theme */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: hsl(var(--secondary));
+}
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground));
+}

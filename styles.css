@@ -1,0 +1,232 @@
+/* ValueGap Finance Dashboard Stylesheet */
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
+:root {
+  color-scheme: light dark;
+
+  /* Map to light-dark() */
+  --bg-primary: light-dark(var(--bg-primary-light), var(--bg-primary-dark));
+  --bg-secondary: light-dark(var(--bg-secondary-light), var(--bg-secondary-dark));
+  --bg-card: light-dark(var(--bg-card-light), var(--bg-card-dark));
+  --bg-input: light-dark(var(--bg-input-light), var(--bg-input-dark));
+  --border-color: light-dark(var(--border-color-light), var(--border-color-dark));
+  --border-focus: light-dark(var(--border-focus-light), var(--border-focus-dark));
+  
+  --text-primary: light-dark(var(--text-primary-light), var(--text-primary-dark));
+  --text-secondary: light-dark(var(--text-secondary-light), var(--text-secondary-dark));
+  --text-muted: light-dark(var(--text-muted-light), var(--text-muted-dark));
+  
+  --color-accent-blue: light-dark(var(--color-accent-blue-light), var(--color-accent-blue-dark));
+  --color-accent-purple: light-dark(var(--color-accent-purple-light), var(--color-accent-purple-dark));
+  --color-accent-green: light-dark(var(--color-accent-green-light), var(--color-accent-green-dark));
+  --color-accent-red: light-dark(var(--color-accent-red-light), var(--color-accent-red-dark));
+  
+  /* Layout utilities */
+  --font-sans: 'Inter', sans-serif;
+  --font-display: 'Outfit', sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+
+  accent-color: var(--color-accent-blue);
+  scrollbar-color: var(--border-color) var(--bg-secondary);
+}
+
+/* Fallback for older browsers without light-dark() */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg-primary: var(--bg-primary-dark);
+    --bg-secondary: var(--bg-secondary-dark);
+    --bg-card: var(--bg-card-dark);
+    --bg-input: var(--bg-input-dark);
+    --border-color: var(--border-color-dark);
+    --border-focus: var(--border-focus-dark);
+    --text-primary: var(--text-primary-dark);
+    --text-secondary: var(--text-secondary-dark);
+    --text-muted: var(--text-muted-dark);
+    --color-accent-blue: var(--color-accent-blue-dark);
+    --color-accent-purple: var(--color-accent-purple-dark);
+    --color-accent-green: var(--color-accent-green-dark);
+    --color-accent-red: var(--color-accent-red-dark);
+  }
+}
+
+/* Base Theme (Slate Default) */
+:root, html[data-theme="slate"] {
+  --bg-primary-light: #f8fafc; --bg-primary-dark: #0f172a;
+  --bg-secondary-light: #f1f5f9; --bg-secondary-dark: #1e293b;
+  --bg-card-light: #ffffff; --bg-card-dark: #1e293b;
+  --bg-input-light: #f1f5f9; --bg-input-dark: #334155;
+  --border-color-light: #e2e8f0; --border-color-dark: #334155;
+  --border-focus-light: #3b82f6; --border-focus-dark: #60a5fa;
+  --text-primary-light: #0f172a; --text-primary-dark: #f8fafc;
+  --text-secondary-light: #475569; --text-secondary-dark: #cbd5e1;
+  --text-muted-light: #64748b; --text-muted-dark: #94a3b8;
+  --color-accent-blue-light: #3b82f6; --color-accent-blue-dark: #60a5fa;
+  --color-accent-purple-light: #8b5cf6; --color-accent-purple-dark: #a78bfa;
+  --color-accent-green-light: #10b981; --color-accent-green-dark: #34d399;
+  --color-accent-red-light: #ef4444; --color-accent-red-dark: #f87171;
+}
+
+/* Palettes */
+html[data-theme="ocean"] {
+  --bg-primary-light: #f0f9ff; --bg-primary-dark: #082f49;
+  --bg-secondary-light: #e0f2fe; --bg-secondary-dark: #0c4a6e;
+  --bg-card-light: #ffffff; --bg-card-dark: #0c4a6e;
+  --bg-input-light: #e0f2fe; --bg-input-dark: #164e63;
+  --border-color-light: #bae6fd; --border-color-dark: #164e63;
+  --border-focus-light: #0ea5e9; --border-focus-dark: #38bdf8;
+  --color-accent-blue-light: #0ea5e9; --color-accent-blue-dark: #38bdf8;
+}
+
+html[data-theme="sunset"] {
+  --bg-primary-light: #fff7ed; --bg-primary-dark: #431407;
+  --bg-secondary-light: #ffedd5; --bg-secondary-dark: #7c2d12;
+  --bg-card-light: #ffffff; --bg-card-dark: #7c2d12;
+  --bg-input-light: #ffedd5; --bg-input-dark: #9a3412;
+  --border-color-light: #fed7aa; --border-color-dark: #9a3412;
+  --border-focus-light: #f97316; --border-focus-dark: #fb923c;
+  --color-accent-blue-light: #f97316; --color-accent-blue-dark: #fb923c;
+}
+
+html[data-theme="forest"] {
+  --bg-primary-light: #f0fdf4; --bg-primary-dark: #052e16;
+  --bg-secondary-light: #dcfce7; --bg-secondary-dark: #14532d;
+  --bg-card-light: #ffffff; --bg-card-dark: #14532d;
+  --bg-input-light: #dcfce7; --bg-input-dark: #166534;
+  --border-color-light: #bbf7d0; --border-color-dark: #166534;
+  --border-focus-light: #22c55e; --border-focus-dark: #4ade80;
+  --color-accent-blue-light: #22c55e; --color-accent-blue-dark: #4ade80;
+}
+
+html[data-theme="royal"] {
+  --bg-primary-light: #faf5ff; --bg-primary-dark: #3b0764;
+  --bg-secondary-light: #f3e8ff; --bg-secondary-dark: #581c87;
+  --bg-card-light: #ffffff; --bg-card-dark: #581c87;
+  --bg-input-light: #f3e8ff; --bg-input-dark: #6b21a8;
+  --border-color-light: #e9d5ff; --border-color-dark: #6b21a8;
+  --border-focus-light: #a855f7; --border-focus-dark: #c084fc;
+  --color-accent-blue-light: #a855f7; --color-accent-blue-dark: #c084fc;
+}
+
+html[data-theme="monochrome"] {
+  --bg-primary-light: #fafafa; --bg-primary-dark: #18181b;
+  --bg-secondary-light: #f4f4f5; --bg-secondary-dark: #27272a;
+  --bg-card-light: #ffffff; --bg-card-dark: #27272a;
+  --bg-input-light: #f4f4f5; --bg-input-dark: #3f3f46;
+  --border-color-light: #e4e4e7; --border-color-dark: #3f3f46;
+  --border-focus-light: #52525b; --border-focus-dark: #a1a1aa;
+  --text-primary-light: #18181b; --text-primary-dark: #fafafa;
+  --color-accent-blue-light: #52525b; --color-accent-blue-dark: #a1a1aa;
+}
+
+/* Base Body */
+body {
+  background-color: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  transition: background-color 0.3s ease, color 0.3s ease;
+}
+
+/* Glass-like Panel replacement -> Flat Panel */
+.glass-panel {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.02), 0 2px 4px -1px rgba(0, 0, 0, 0.02);
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.glass-panel-glow {
+  background: var(--bg-card);
+  border: 1px solid var(--border-color);
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.05), 0 4px 6px -2px rgba(0, 0, 0, 0.025);
+  transition: background-color 0.3s ease, border-color 0.3s ease;
+}
+
+.glass-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border-color);
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  color: var(--text-primary);
+}
+
+.glass-input:focus {
+  outline: none;
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+
+/* Display styles */
+.font-display { font-family: var(--font-display); }
+.font-mono { font-family: var(--font-mono); }
+.sort-icon { transition: transform 0.2s ease, opacity 0.2s ease; }
+
+/* Badges */
+.badge-green {
+  background: rgba(16, 185, 129, 0.1);
+  color: var(--color-accent-green);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+.badge-red {
+  background: rgba(239, 68, 68, 0.1);
+  color: var(--color-accent-red);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+}
+.badge-blue {
+  background: rgba(59, 130, 246, 0.1);
+  color: var(--color-accent-blue);
+  border: 1px solid rgba(59, 130, 246, 0.2);
+}
+
+#details-drawer {
+  transition: transform 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.table-row-hover {
+  transition: background-color 0.15s ease;
+}
+
+.table-row-hover:hover {
+  background-color: var(--bg-secondary);
+}
+
+.toggle-bg {
+  background-color: var(--bg-input);
+  border: 1px solid var(--border-color);
+}
+
+.toggle-dot {
+  background-color: var(--bg-primary);
+  box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+  transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  border: 1px solid var(--border-color);
+}
+
+/* Animations */
+.chart-line {
+  stroke-dasharray: 1000;
+  stroke-dashoffset: 1000;
+  animation: draw-chart 2s forwards ease-in-out;
+}
+
+@keyframes draw-chart {
+  to { stroke-dashoffset: 0; }
+}
+
+/* Custom Scrollbar - Legacy Fallback for WebKit */
+@supports not (scrollbar-color: auto) {
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: var(--bg-secondary); }
+  ::-webkit-scrollbar-thumb { background: var(--border-color); border-radius: 9999px; }
+  ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+}
+
+/* Fluid Responsive Grid utility class */
+.fluid-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 1rem;
+}

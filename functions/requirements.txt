@@ -1,0 +1,8 @@
+fastapi
+uvicorn
+yahooquery
+firebase-functions
+firebase-admin
+yfinance
+requests
+a2wsgi
