@@ -7,6 +7,15 @@ export const TopMovers = ({ assets, onSelectAsset }: { assets: any[], onSelectAs
   
   if (!assets || assets.length === 0) return null;
 
+  const formatCurrency = (value: number | null | undefined, exchange?: string) => {
+    if (value == null) return "N/A";
+    let currency = "USD";
+    if (exchange === "TASE") currency = "ILS";
+    else if (exchange && ['LSE', 'LSE_BULL'].includes(exchange)) currency = "GBP";
+    else if (exchange && ['XETR', 'FWB'].includes(exchange)) currency = "EUR";
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(value);
+  };
+
   // Calculate day change for all
   const mapped = assets.map(a => {
     const history = (a.history_dict && a.history_dict['1d']) || a.history || [];
@@ -44,11 +53,11 @@ export const TopMovers = ({ assets, onSelectAsset }: { assets: any[], onSelectAs
               <div className="w-1/2 flex items-center gap-3">
                 <StockIcon ticker={asset.ticker} name={asset.company_name} className="w-8 h-8" />
                 <div className="flex flex-col">
-                  <span className="font-bold text-foreground text-sm leading-tight">{asset.ticker}</span>
+                  <span className="font-bold text-foreground text-sm leading-tight">{asset.ticker} <span className="text-[10px] text-muted-foreground font-normal ml-1">({asset.exchange || 'Unknown'})</span></span>
                   <span className="text-[10px] text-muted-foreground truncate w-24 leading-tight">{asset.company_name}</span>
                 </div>
               </div>
-              <div className="w-1/4 text-right font-mono text-sm text-foreground">{asset.lastPrice.toFixed(2)}</div>
+              <div className="w-1/4 text-right font-mono text-sm text-foreground">{formatCurrency(asset.lastPrice, asset.exchange)}</div>
               <div className={`w-1/4 text-right font-mono font-bold text-sm flex justify-end items-center gap-2 ${isGreen ? 'text-success' : 'text-danger'}`}>
                 <div className="hidden sm:block">
                   <Sparkline data={asset.history} width={30} height={14} />

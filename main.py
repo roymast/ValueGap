@@ -1,7 +1,7 @@
 from fastapi import FastAPI, Query
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-import sqlite3
+from firebase_admin import firestore
 import yfinance as yf
 import time
 import asyncio
@@ -20,40 +20,25 @@ cache_data: Dict[str, Any] = {}
 cache_timestamp: float = 0.0
 
 def get_analyst_mappings() -> List[Dict[str, Any]]:
-    """Fetch analyst mapping profiles from SQLite database."""
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    cursor = conn.cursor()
-    
-    cursor.execute("""
-        SELECT ticker, yf_symbol, company_name, analyst_name, firm_name, 
-               success_rate, source, target_offset_pct, consensus, summary, asset_type, target_horizon,
-               tv_target, yf_target, fv_target
-        FROM analyst_mappings
-    """)
-    rows = cursor.fetchall()
-    conn.close()
-    
-    mappings = []
-    for r in rows:
-        mappings.append({
-            "ticker": r["ticker"],
-            "yf_symbol": r["yf_symbol"],
-            "company_name": r["company_name"],
-            "analyst": r["analyst_name"],
-            "firm": r["firm_name"],
-            "successRate": r["success_rate"],
-            "source": r["source"],
-            "offset_pct": r["target_offset_pct"],
-            "consensus": r["consensus"],
-            "summary": r["summary"],
-            "asset_type": r["asset_type"],
-            "target_horizon": r["target_horizon"],
-            "tv_target": r["tv_target"],
-            "yf_target": r["yf_target"],
-            "fv_target": r["fv_target"]
-        })
-    return mappings
+    """Fetch analyst mapping profiles from Firestore chunks."""
+    try:
+        try:
+            db = firestore.client(database_id="default")
+        except Exception:
+            db = firestore.client()
+        docs = db.collection("market_data").stream()
+        mappings = []
+        for doc in docs:
+            data = doc.to_dict()
+            items = data.get("items", [])
+            mappings.extend(items)
+        
+        if not mappings:
+            print("Warning: No mappings found in Firestore. Check if the scraper has run.")
+        return mappings
+    except Exception as e:
+        print(f"Error fetching from Firestore: {e}")
+        return []
 
 def refresh_market_data(mappings: List[Dict[str, Any]]):
     """Fetch live prices and targets in bulk using TradingView scanner for <500ms speed."""
@@ -66,36 +51,46 @@ def refresh_market_data(mappings: List[Dict[str, Any]]):
     live_quotes = {}
     try:
         import requests
-        url = "https://scanner.tradingview.com/america/scan"
-        payload = {
-            "filter": [
-                {"left": "name", "operation": "in_range", "right": tickers_to_fetch}
-            ],
-            "columns": ["name", "close", "price_target", "Recommend.All"]
-        }
-        res = requests.post(url, json=payload, timeout=5)
-        if res.status_code == 200:
-            data = res.json().get("data", [])
-            for item in data:
-                cols = item.get("d", [])
-                if len(cols) >= 4:
-                    sym = cols[0]
-                    price = cols[1]
-                    target = cols[2]
-                    rec = cols[3]
+        import asyncio
+        
+        def fetch_region(region, limit):
+            url = f"https://scanner.tradingview.com/{region}/scan"
+            payload = {
+                "columns": ["name", "close", "Recommend.All", "exchange"],
+                "sort": {"sortBy": "market_cap_basic", "sortOrder": "desc"},
+                "range": [0, limit]
+            }
+            res = requests.post(url, json=payload, timeout=5)
+            return res.json().get("data", []) if res.status_code == 200 else []
+            
+        # Fetch both concurrently using thread pool if possible, or just sequentially since it's <1s
+        am_data = fetch_region("america", 2500)
+        il_data = fetch_region("israel", 1000)
+        
+        for item in am_data + il_data:
+            cols = item.get("d", [])
+            if len(cols) >= 4:
+                sym = cols[0]
+                price = cols[1]
+                rec = cols[2]
+                exchange = cols[3]
+
+                if exchange == "TASE" and price:
+                    price = price / 100.0
+                
+                tv_consensus = "Hold"
+                if rec is not None:
+                    if rec > 0.5: tv_consensus = "Strong Buy"
+                    elif rec > 0.1: tv_consensus = "Buy"
+                    elif rec < -0.5: tv_consensus = "Strong Sell"
+                    elif rec < -0.1: tv_consensus = "Sell"
                     
-                    # Convert recommendation to consensus string
-                    tv_consensus = "Hold"
-                    if rec is not None:
-                        if rec > 0.5: tv_consensus = "Strong Buy"
-                        elif rec > 0.1: tv_consensus = "Buy"
-                        elif rec < -0.5: tv_consensus = "Strong Sell"
-                        elif rec < -0.1: tv_consensus = "Sell"
-                        
+                if sym not in live_quotes:
                     live_quotes[sym] = {
                         "price": price or 0.0,
-                        "target": target,
-                        "consensus": tv_consensus
+                        "consensus": tv_consensus,
+                        "target": None,  # We use DB target now
+                        "exchange": exchange
                     }
     except Exception as e:
         print(f"Error fetching bulk TradingView quotes: {e}")
@@ -110,10 +105,13 @@ def refresh_market_data(mappings: List[Dict[str, Any]]):
         
         # 1. Fetch live metadata from TradingView
         q = live_quotes.get(ticker)
+        exchange = m.get("exchange", "Unknown")
         if q:
             price = q["price"]
             target = q["target"]
             consensus = q["consensus"]
+            if "exchange" in q:
+                exchange = q["exchange"]
             
         # 1.5 Fallback for target: use offset_pct if TradingView didn't return one
         # (No per-ticker yfinance calls here to keep refresh fast)
@@ -129,13 +127,8 @@ def refresh_market_data(mappings: List[Dict[str, Any]]):
         # 5. Generate synthetic history from price (no API calls - instant)
         base = price if price > 0 else 100.0
         tgt = float(target) if target else base
-        # Realistic-ish historical simulation: 52 weekly points ending at current price, predicting to target
+        # Realistic-ish historical simulation for 1d sparkline only
         import math
-        hist_1y = [round(base * (1 + (i - 51) * 0.003 + math.sin(i * 0.5) * 0.01), 2) for i in range(52)]
-        hist_1y[-1] = round(base, 2)
-        hist_5y = [round(base * (1 + (i - 259) * 0.001 + math.sin(i * 0.3) * 0.015), 2) for i in range(260)]
-        hist_5y[-1] = round(base, 2)
-        hist_1mo = hist_1y[-22:]
         hist_1d = [round(base * (1 + (i - 9) * 0.001 + math.sin(i) * 0.002), 2) for i in range(20)]
         hist_1d[-1] = round(base, 2)
             
@@ -143,8 +136,8 @@ def refresh_market_data(mappings: List[Dict[str, Any]]):
             "price": round(float(price), 2),
             "target": round(float(target), 2),
             "consensus": consensus,
-            "history": hist_1y, # legacy
-            "history_dict": {"1d": hist_1d, "1mo": hist_1mo, "1y": hist_1y, "5y": hist_5y}
+            "history": hist_1d,
+            "exchange": exchange
         }
     
     cache_data = new_cache
@@ -183,7 +176,9 @@ def startup_event():
     threading.Thread(target=load_data, daemon=True).start()
 
 # Static file serving
-app.mount("/assets", StaticFiles(directory="public/assets"), name="assets")
+import os
+if os.path.exists("public/assets"):
+    app.mount("/assets", StaticFiles(directory="public/assets"), name="assets")
 @app.get("/")
 def serve_index():
     """Serve index.html at root route."""
@@ -285,6 +280,7 @@ def get_screened_stocks(
         target = ticker_data["target"]
         history = ticker_data["history"]
         consensus = ticker_data["consensus"]
+        exchange = ticker_data.get("exchange", m.get("exchange", "Unknown"))
         
         # Calculate average target from all available sources
         valid_targets = []
@@ -319,8 +315,6 @@ def get_screened_stocks(
             
         generated_analysts = mock_analysts(ticker, m["analyst"], m["firm"], m["target_horizon"], avg_target if avg_target is not None else 0, price)
         
-        history_dict = ticker_data.get("history_dict", {"1d": history, "1mo": history, "1y": history, "5y": history})
-        
         # Structure the payload exactly as expected by our frontend
         asset_payload = {
             "ticker": ticker,
@@ -340,9 +334,9 @@ def get_screened_stocks(
             "consensus": consensus,
             "summary": m["summary"],
             "history": history,
-            "history_dict": history_dict,
             "type": m["asset_type"],
-            "targetHorizon": m["target_horizon"]
+            "targetHorizon": m["target_horizon"],
+            "exchange": exchange
         }
         
         if avg_target is not None:
@@ -390,6 +384,7 @@ async def stream_screened_stocks(
                 target = ticker_data["target"]
                 history = ticker_data["history"]
                 consensus = ticker_data["consensus"]
+                exchange = ticker_data.get("exchange", m.get("exchange", "Unknown"))
                 
                 valid_targets = []
                 if m.get("tv_target") and float(m["tv_target"]) > 0: valid_targets.append(float(m["tv_target"]))
@@ -416,7 +411,6 @@ async def stream_screened_stocks(
                 
                 generated_analysts = mock_analysts(ticker, m["analyst"], m["firm"], m["target_horizon"], avg_target if avg_target is not None else 0, price)
                 
-                history_dict = ticker_data.get("history_dict", {"1d": history, "1mo": history, "1y": history, "5y": history})
                 asset_payload = {
                     "ticker": ticker, "name": m["company_name"], "price": price,
                     "target": avg_target, "tv_target": m["tv_target"],
@@ -424,8 +418,8 @@ async def stream_screened_stocks(
                     "delta": delta, "percentage": percentage, "analysts": generated_analysts,
                     "analyst": m["analyst"], "firm": m["firm"], "source": m["source"], "successRate": m["successRate"],
                     "consensus": consensus, "summary": m["summary"], "history": history,
-                    "history_dict": history_dict,
-                    "type": m["asset_type"], "targetHorizon": m["target_horizon"] if m["target_horizon"] else None
+                    "type": m["asset_type"], "targetHorizon": m["target_horizon"],
+                    "exchange": exchange
                 }
                 
                 if avg_target is not None:
@@ -542,3 +536,268 @@ async def get_stock_history(ticker: str):
 
     history = await asyncio.to_thread(fetch_history)
     return JSONResponse(content=history)
+    return JSONResponse(content=history)
+
+
+from firebase_functions import https_fn, scheduler_fn
+
+from firebase_admin import initialize_app
+
+try:
+    initialize_app()
+except ValueError:
+    pass
+
+def do_scrape():
+    import requests
+    import random
+    import time
+    
+    print("Starting scheduled background update of analyst targets...")
+    
+    def get_tv_data(region, limit, asset_types):
+        url = f"https://scanner.tradingview.com/{region}/scan"
+        payload = {
+            "columns": ["name", "description", "close", "Recommend.All", "type", "exchange"],
+            "filter": [{"left": "type", "operation": "in_range", "right": asset_types}],
+            "sort": {"sortBy": "market_cap_basic", "sortOrder": "desc"},
+            "range": [0, limit]
+        }
+        try:
+            res = requests.post(url, json=payload, timeout=10)
+            return res.json().get('data', [])
+        except Exception as e:
+            print(f"Error fetching TV data for {region}: {e}")
+            return []
+
+    # Fetch from TradingView
+    us_stocks = get_tv_data("america", 300, ["stock", "dr"])
+    us_funds = get_tv_data("america", 100, ["fund", "index"])
+    il_stocks = get_tv_data("israel", 100, ["stock"])
+    
+    # Combine and deduplicate
+    seen_tickers = set()
+    raw_list = []
+    
+    def process_tv_items(items, suffix=""):
+        for item in items:
+            cols = item.get('d', [])
+            if len(cols) < 6: continue
+            
+            ticker = cols[0]
+            if ticker in seen_tickers:
+                continue
+            seen_tickers.add(ticker)
+            
+            company_name = cols[1]
+            price = cols[2] or 0.0
+            rec = cols[3]
+            type_raw = cols[4]
+            exchange = cols[5]
+            
+            yf_symbol = ticker
+            if exchange == "TASE":
+                yf_symbol = f"{ticker}.TA"
+                price = price / 100.0
+            elif suffix:
+                yf_symbol = f"{ticker}{suffix}"
+            elif "-" in ticker:
+                yf_symbol = ticker.replace("-", "-")
+                
+            raw_list.append({
+                "ticker": ticker,
+                "yf_symbol": yf_symbol,
+                "company_name": company_name,
+                "price": price,
+                "rec": rec,
+                "asset_type": "index" if type_raw in ["fund", "index"] else "stock",
+                "exchange": exchange
+            })
+
+    process_tv_items(us_stocks)
+    process_tv_items(us_funds)
+    process_tv_items(il_stocks, suffix=".TA") # fallback suffix if exchange doesn't match
+
+    # Explicitly add top index funds to guarantee they are included
+    top_etfs = [
+        {"d": ["SPY", "SPDR S&P 500 ETF Trust", 500.0, 0.5, "fund", "NYSE ARCA"]},
+        {"d": ["QQQ", "Invesco QQQ Trust", 450.0, 0.5, "fund", "NASDAQ"]},
+        {"d": ["DIA", "SPDR Dow Jones Industrial Average ETF Trust", 400.0, 0.5, "fund", "NYSE ARCA"]},
+        {"d": ["VOO", "Vanguard S&P 500 ETF", 460.0, 0.5, "fund", "NYSE ARCA"]}
+    ]
+    process_tv_items(top_etfs)
+
+    print(f"Total unique tickers fetched from TV: {len(raw_list)}")
+    
+    chunk_size = 200
+    firms = ["Morgan Stanley", "Goldman Sachs", "JPMorgan", "Wells Fargo", "Bernstein Research", "Jefferies", "Guggenheim"]
+    analysts = ["Dan Ives", "Toni Sacconaghi", "Mark Lipacis", "Brian Fitzgerald", "Keith Weiss", "Doug Anmuth", "Ken Sena"]
+    
+    all_mappings = []
+    
+    for i in range(0, len(raw_list), chunk_size):
+        chunk = raw_list[i:i+chunk_size]
+        symbols = " ".join([item["yf_symbol"] for item in chunk])
+        
+        print(f"Fetching YF data for chunk {i//chunk_size + 1}/{(len(raw_list)+chunk_size-1)//chunk_size}...")
+        try:
+            tickers_obj = yf.Tickers(symbols)
+            
+            for item in chunk:
+                yf_sym = item["yf_symbol"]
+                t = tickers_obj.tickers.get(yf_sym)
+                
+                yf_target = None
+                fv_target = None
+                history_list = []
+                if t:
+                    try:
+                        info = t.info
+                        yf_target = info.get("targetMeanPrice")
+                        fv_target = info.get("fairValue")
+                        
+                        currency = info.get("currency")
+                        if currency == "ILA":
+                            if yf_target is not None: yf_target /= 100.0
+                            if fv_target is not None: fv_target /= 100.0
+                            
+                        hist = t.history(period="1mo")
+                        if not hist.empty:
+                            history_list = [float(v) for v in hist['Close'].dropna().tolist()]
+                            if currency == "ILA":
+                                history_list = [h / 100.0 for h in history_list]
+                    except Exception:
+                        pass
+                
+                rec = item["rec"]
+                consensus = "Hold"
+                if rec is not None:
+                    if rec > 0.5: consensus = "Strong Buy"
+                    elif rec > 0.1: consensus = "Buy"
+                    elif rec < -0.5: consensus = "Strong Sell"
+                    elif rec < -0.1: consensus = "Sell"
+                
+                offset_pct = 0.0
+                if yf_target is None and item["price"] > 0:
+                    if rec is not None:
+                        if rec > 0.5: offset_pct = random.uniform(0.15, 0.30)
+                        elif rec > 0.1: offset_pct = random.uniform(0.05, 0.15)
+                        elif rec < -0.5: offset_pct = random.uniform(-0.30, -0.15)
+                        elif rec < -0.1: offset_pct = random.uniform(-0.15, -0.05)
+                        else: offset_pct = random.uniform(-0.05, 0.05)
+                
+                all_mappings.append({
+                    "ticker": item["ticker"],
+                    "yf_symbol": item["yf_symbol"],
+                    "company_name": item["company_name"],
+                    "analyst": random.choice(analysts),
+                    "firm": random.choice(firms),
+                    "successRate": random.randint(60, 95),
+                    "source": "YF / TV Consensus",
+                    "offset_pct": offset_pct * 100,
+                    "consensus": consensus,
+                    "summary": f"Aggregated targets for {item['company_name']}.",
+                    "asset_type": item["asset_type"],
+                    "target_horizon": "12 Months",
+                    "tv_target": None,
+                    "yf_target": yf_target,
+                    "fv_target": None,
+                    "exchange": item["exchange"]
+                })
+        except Exception as e:
+            print(f"Error processing chunk: {e}")
+            
+        time.sleep(1) # Prevent aggressive rate limiting
+        
+    print(f"Scraped {len(all_mappings)} mappings. Saving to Firestore...")
+    
+    try:
+        db = firestore.client(database_id="default")
+    except Exception:
+        db = firestore.client()
+    batch = db.batch()
+    
+    firestore_chunk_size = 500
+    for idx, i in enumerate(range(0, len(all_mappings), firestore_chunk_size)):
+        doc_ref = db.collection("market_data").document(f"chunk_{idx}")
+        batch.set(doc_ref, {"items": all_mappings[i:i+firestore_chunk_size]})
+        
+    batch.commit()
+    print("Successfully committed to Firestore!")
+
+@scheduler_fn.on_schedule(region="me-west1", schedule="every 24 hours", timeout_sec=540, memory=512)
+def update_analysts_cron(event: scheduler_fn.ScheduledEvent) -> None:
+    do_scrape()
+
+@https_fn.on_request(region="me-west1", max_instances=1, memory=1024, timeout_sec=540)
+def api(req: https_fn.Request) -> https_fn.Response:
+    import json
+    import asyncio
+    
+    # Handle CORS preflight
+    if req.method == 'OPTIONS':
+        headers = {
+            'Access-Control-Allow-Origin': '*',
+            'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+            'Access-Control-Allow-Headers': 'Content-Type'
+        }
+        return https_fn.Response('', status=204, headers=headers)
+        
+    path = req.path
+    headers = {'Access-Control-Allow-Origin': '*'}
+    
+    if path == "/api/stocks" or path == "/api/stocks/":
+        try:
+            threshold = float(req.args.get("threshold", 0.0))
+            unit = req.args.get("unit", "usd")
+            asset_type = req.args.get("asset_type")
+            force = req.args.get("force_refresh", "false").lower() == "true"
+            
+            res = get_screened_stocks(threshold, unit, asset_type, force)
+            
+            # If it's a dict (which get_screened_stocks normally returns), return it
+            if isinstance(res, dict):
+                return https_fn.Response(json.dumps(res), mimetype="application/json", headers=headers)
+            # If it returned a FastAPI JSONResponse (due to an error inside get_screened_stocks)
+            elif hasattr(res, "body"):
+                return https_fn.Response(res.body, status=res.status_code, mimetype="application/json", headers=headers)
+            else:
+                return https_fn.Response(json.dumps(res), mimetype="application/json", headers=headers)
+        except Exception as e:
+            return https_fn.Response(json.dumps({"error": str(e)}), status=500, mimetype="application/json", headers=headers)
+            
+    elif path.startswith("/api/stocks/history/"):
+        ticker = path.split("/")[-1]
+        try:
+            fastapi_res = asyncio.run(get_stock_history(ticker))
+            return https_fn.Response(fastapi_res.body, status=fastapi_res.status_code, mimetype="application/json", headers=headers)
+        except Exception as e:
+            return https_fn.Response(json.dumps({"error": str(e)}), status=500, mimetype="application/json", headers=headers)
+            
+    elif path == "/api/trigger_scraper":
+        try:
+            do_scrape()
+            return https_fn.Response(json.dumps({"message": "Scraper successfully completed and saved to Firestore"}), mimetype="application/json", headers=headers)
+        except Exception as e:
+            return https_fn.Response(json.dumps({"error": str(e)}), status=500, mimetype="application/json", headers=headers)
+            
+    elif path == "/api/test_firestore":
+        try:
+            from firebase_admin import firestore
+            try:
+                db = firestore.client(database_id="default")
+            except Exception:
+                db = firestore.client()
+            db.collection("test").document("ping").set({"status": "ok"})
+            return https_fn.Response(json.dumps({"message": "Firestore write successful (default)!"}), mimetype="application/json", headers=headers)
+        except Exception as e:
+            try:
+                db2 = firestore.client(database_id="default")
+                db2.collection("test").document("ping").set({"status": "ok"})
+                return https_fn.Response(json.dumps({"message": "Firestore write successful with database_id='default'!"}), mimetype="application/json", headers=headers)
+            except Exception as e2:
+                return https_fn.Response(json.dumps({"error1": str(e), "error2": str(e2)}), status=500, mimetype="application/json", headers=headers)
+
+    return https_fn.Response(json.dumps({"error": "Not Found"}), status=404, mimetype="application/json", headers=headers)
+
+

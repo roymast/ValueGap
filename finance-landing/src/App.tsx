@@ -23,6 +23,7 @@ interface Asset {
   delta: number;
   percentage: number;
   type: string;
+  exchange?: string;
   analysts?: Analyst[];
   history?: number[];
   history_dict?: {
@@ -63,6 +64,7 @@ function App() {
   const [currentScreen, setCurrentScreen] = useState<'home' | 'screener' | 'watchlist'>('home');
   const [chartTimeframe, setChartTimeframe] = useState<'1d' | '1mo' | '1y' | '5y'>('1d');
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  const [showOlderAnalysts, setShowOlderAnalysts] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const fetchedHistoryRef = useRef<Set<string>>(new Set());
 
@@ -130,6 +132,7 @@ function App() {
   // Open detail panel and lazily fetch real history for this ticker
   const fetchAndOpenDetail = async (asset: Asset) => {
     setSelectedAsset(asset); // open immediately with synthetic history
+    setShowOlderAnalysts(false);
     setChartTimeframe('1d');
     setHistoryLoading(true);
     try {
@@ -155,9 +158,17 @@ function App() {
     fetchMarketData();
   }, []);
 
-  const formatCurrency = (value: number | null | undefined) => {
+  const getCurrencyCode = (exchange?: string) => {
+    if (exchange === "TASE") return "ILS";
+    if (exchange && ['LSE', 'LSE_BULL'].includes(exchange)) return "GBP";
+    if (exchange && ['XETR', 'FWB'].includes(exchange)) return "EUR";
+    return "USD";
+  };
+
+  const formatCurrency = (value: number | null | undefined, exchange?: string) => {
     if (value == null) return "N/A";
-    return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+    const currency = getCurrencyCode(exchange);
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(value);
   };
 
   const formatDelta = (value: number | null | undefined, isPercent: boolean | 'pct' | 'usd' | 'pts' = false) => {
@@ -169,7 +180,21 @@ function App() {
     let num = '';
     if (type === 'pct') num = `${value.toFixed(1)}%`;
     else if (type === 'pts') num = value.toFixed(2);
-    else num = formatCurrency(value);
+    else num = formatCurrency(value, typeof isPercent === 'string' ? undefined : undefined); // When not passing exchange, defaults to USD, handled individually below
+    
+    return `${sign}${num}`;
+  };
+
+  const formatDeltaWithExchange = (value: number | null | undefined, isPercent: boolean | 'pct' | 'usd' | 'pts' = false, exchange?: string) => {
+    if (value == null) return "N/A";
+    const sign = value > 0 ? '+' : '';
+    
+    const type = isPercent === true ? 'pct' : isPercent === false ? 'usd' : isPercent;
+    
+    let num = '';
+    if (type === 'pct') num = `${value.toFixed(1)}%`;
+    else if (type === 'pts') num = value.toFixed(2);
+    else num = formatCurrency(value, exchange);
     
     return `${sign}${num}`;
   };
@@ -244,7 +269,7 @@ function App() {
     const overallDelta = history[history.length - 1] - history[0];
     const overallDeltaPct = (overallDelta / history[0]) * 100;
     const color = overallDelta >= 0 ? 'text-success' : 'text-danger';
-    const str = `${overallDelta >= 0 ? '+' : ''}${formatCurrency(overallDelta)} (${overallDelta >= 0 ? '+' : ''}${overallDeltaPct.toFixed(2)}%)`;
+    const str = `${overallDelta >= 0 ? '+' : ''}${formatCurrency(overallDelta, asset.exchange)} (${overallDelta >= 0 ? '+' : ''}${overallDeltaPct.toFixed(2)}%)`;
     return (
       <div className="flex flex-col mt-2 px-1">
         <span className="text-[12px] font-bold text-foreground opacity-75">{asset.ticker} {timeframe}</span>
@@ -348,7 +373,7 @@ function App() {
                           <div className="flex items-center gap-2">
                             <StockIcon ticker={asset.ticker} name={asset.name} className="w-8 h-8" />
                             <div>
-                              <h3 className="font-bold text-foreground leading-none mb-1">{asset.ticker}</h3>
+                              <h3 className="font-bold text-foreground leading-none mb-1">{asset.ticker} <span className="text-[10px] text-muted-foreground font-normal ml-1">({asset.exchange || 'Unknown'})</span></h3>
                               <p className="text-[10px] text-muted-foreground truncate w-20">{asset.name}</p>
                             </div>
                           </div>
@@ -383,7 +408,7 @@ function App() {
                           <div className="flex items-center gap-2">
                             <StockIcon ticker={asset.ticker} name={asset.name} className="w-8 h-8" />
                             <div>
-                              <h3 className="font-bold text-foreground leading-none mb-1">{asset.ticker}</h3>
+                              <h3 className="font-bold text-foreground leading-none mb-1">{asset.ticker} <span className="text-[10px] text-muted-foreground font-normal ml-1">({asset.exchange || 'Unknown'})</span></h3>
                               <p className="text-[10px] text-muted-foreground truncate w-20">{asset.name}</p>
                             </div>
                           </div>
@@ -475,13 +500,13 @@ function App() {
                           </button>
                           <StockIcon ticker={asset.ticker} name={asset.name} className="w-7 h-7" />
                           <div>
-                            <div className="font-bold text-foreground font-sans text-sm leading-tight">{asset.ticker}</div>
+                            <div className="font-bold text-foreground font-sans text-sm leading-tight">{asset.ticker} <span className="text-[10px] text-muted-foreground font-normal ml-1">({asset.exchange || 'Unknown'})</span></div>
                             <div className="text-[10px] text-muted-foreground font-sans line-clamp-1 max-w-[150px] leading-tight">{asset.name}</div>
                           </div>
                         </div>
                       </td>
                       <td className="py-2.5 px-4 text-right text-foreground font-semibold">
-                        {formatCurrency(asset.price)}
+                        {formatCurrency(asset.price, asset.exchange)}
                       </td>
                       <td className="py-2.5 px-4 text-right">
                         <div className="flex justify-end pr-2">
@@ -489,10 +514,10 @@ function App() {
                         </div>
                       </td>
                       <td className={`py-2.5 px-4 text-right font-bold ${activeTab === 'undervalued' ? 'text-success' : 'text-danger'}`}>
-                        {formatDelta(unit === 'pct' ? asset.percentage : asset.delta, unit)}
+                        {formatDeltaWithExchange(unit === 'pct' ? asset.percentage : asset.delta, unit, asset.exchange)}
                       </td>
                       <td className="py-2.5 px-4 text-right text-muted-foreground font-semibold">
-                        {formatCurrency(asset.target)}
+                        {formatCurrency(asset.target, asset.exchange)}
                       </td>
                     </tr>
                   ))}
@@ -522,7 +547,7 @@ function App() {
                       <div className="flex items-center gap-2">
                         <StockIcon ticker={asset.ticker} name={asset.name} className="w-8 h-8" />
                         <div>
-                          <h3 className="font-bold text-foreground leading-none">{asset.ticker}</h3>
+                          <h3 className="font-bold text-foreground leading-none">{asset.ticker} <span className="text-[10px] text-muted-foreground font-normal ml-1">({asset.exchange || 'Unknown'})</span></h3>
                           <p className="text-[10px] text-muted-foreground truncate w-24 mt-0.5">{asset.name}</p>
                         </div>
                       </div>
@@ -531,7 +556,7 @@ function App() {
                     
                     <div className="flex justify-between items-end mt-4">
                       <div>
-                        <div className="font-mono font-bold text-lg text-foreground">{formatCurrency(asset.price)}</div>
+                        <div className="font-mono font-bold text-lg text-foreground">{formatCurrency(asset.price, asset.exchange)}</div>
                         <div className="text-[10px] text-muted-foreground font-bold uppercase mt-1">Price</div>
                       </div>
                       
@@ -562,14 +587,14 @@ function App() {
                 <StockIcon ticker={selectedAsset.ticker} name={selectedAsset.name} className="w-12 h-12" />
                 <div>
                   <h2 className="text-2xl font-black text-foreground tracking-tight flex items-center gap-2">
-                    {selectedAsset.ticker}
+                    {selectedAsset.ticker} <span className="text-sm font-normal text-muted-foreground">({selectedAsset.exchange || 'Unknown'})</span>
                   </h2>
                   <div className="text-sm text-muted-foreground line-clamp-1">{selectedAsset.name}</div>
                 </div>
               </div>
               <div className="text-right flex flex-col items-end flex-shrink-0">
                 <button onClick={() => setSelectedAsset(null)} className="text-muted-foreground hover:text-foreground p-1 rounded-md mb-2 transition-colors"><X className="w-6 h-6"/></button>
-                <div className="text-2xl font-mono font-bold text-foreground">{formatCurrency(selectedAsset.price)}</div>
+                <div className="text-2xl font-mono font-bold text-foreground">{formatCurrency(selectedAsset.price, selectedAsset.exchange)}</div>
                 <div className={`text-sm font-bold mt-1 ${selectedAsset.percentage >= 0 ? 'text-success' : 'text-danger'}`}>
                   {formatDelta(selectedAsset.percentage, true)} EXP. GAIN
                 </div>
@@ -610,7 +635,7 @@ function App() {
               <div className="grid grid-cols-3 gap-4 mb-6">
                 <div className="bg-card p-4 rounded-lg border border-border">
                   <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Delta</div>
-                  <div className={`text-lg font-mono font-bold ${selectedAsset.delta && selectedAsset.delta >= 0 ? 'text-success' : selectedAsset.delta == null ? 'text-muted-foreground' : 'text-danger'}`}>{formatDelta(selectedAsset.delta, false)}</div>
+                  <div className={`text-lg font-mono font-bold ${selectedAsset.delta && selectedAsset.delta >= 0 ? 'text-success' : selectedAsset.delta == null ? 'text-muted-foreground' : 'text-danger'}`}>{formatDeltaWithExchange(selectedAsset.delta, false, selectedAsset.exchange)}</div>
                 </div>
                 <div className="bg-card p-4 rounded-lg border border-border">
                   <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Exp. Gain %</div>
@@ -618,7 +643,7 @@ function App() {
                 </div>
                 <div className="bg-card p-4 rounded-lg border border-border">
                   <div className="text-[10px] text-muted-foreground font-bold uppercase tracking-wider mb-1">Consensus Target</div>
-                  <div className={`text-lg font-mono font-bold text-foreground`}>{formatCurrency(selectedAsset.target)}</div>
+                  <div className={`text-lg font-mono font-bold text-foreground`}>{formatCurrency(selectedAsset.target, selectedAsset.exchange)}</div>
                 </div>
               </div>
 
@@ -628,22 +653,33 @@ function App() {
                   <h4 className="font-bold text-foreground text-sm uppercase tracking-wider">Analyst Ratings</h4>
                   <span className="text-xs text-muted-foreground font-semibold bg-secondary px-2 py-1 rounded">{selectedAsset.analysts?.length || 0} Analysts</span>
                 </div>
-                <div className="flex overflow-x-auto gap-4 pb-6 scrollbar-thin">
-                  {selectedAsset.analysts && selectedAsset.analysts.length > 0 ? selectedAsset.analysts.map((an, idx) => (
-                    <div key={idx} className="flex-none w-[280px] bg-background p-5 rounded-lg border border-border hover:border-primary/50 transition-colors shadow-sm">
-                      <div className="flex justify-between items-start mb-3">
-                        <h5 className="font-bold text-foreground text-sm">{an.firm}</h5>
-                        <span className="font-mono font-bold text-foreground text-lg leading-none">{an.target != null ? `$${an.target.toFixed(2)}` : 'N/A'}</span>
-                      </div>
-                      <div className="flex justify-between items-center">
-                        <span className={`font-bold px-2 py-1 rounded text-[10px] uppercase tracking-wider ${an.rating.includes('Buy') || an.rating.includes('Overweight') ? 'bg-success/20 text-success' : an.rating.includes('Sell') || an.rating.includes('Underweight') ? 'bg-danger/20 text-danger' : 'bg-muted text-muted-foreground'}`}>
-                          {an.rating}
-                        </span>
-                        <span className="text-muted-foreground text-[10px] font-semibold uppercase">{an.days_ago}d ago</span>
-                      </div>
-                    </div>
-                  )) : (
-                     <div className="text-muted-foreground text-sm italic">No detailed analyst data available.</div>
+                <div className="flex flex-col gap-4 pb-6">
+                  <div className="flex overflow-x-auto gap-4 scrollbar-thin">
+                    {selectedAsset.analysts && selectedAsset.analysts.length > 0 ? (
+                      (() => {
+                        const visibleAnalysts = showOlderAnalysts ? selectedAsset.analysts : selectedAsset.analysts.filter(an => an.days_ago != null && an.days_ago <= 31);
+                        if (visibleAnalysts.length === 0) return <div className="text-muted-foreground text-sm italic py-2">No recent analyst data available in the last 31 days.</div>;
+                        return visibleAnalysts.map((an, idx) => (
+                          <div key={idx} className="flex-none w-[280px] bg-background p-5 rounded-lg border border-border hover:border-primary/50 transition-colors shadow-sm">
+                            <div className="flex justify-between items-start mb-3">
+                              <h5 className="font-bold text-foreground text-sm">{an.firm}</h5>
+                              <span className="font-mono font-bold text-foreground text-lg leading-none">{an.target != null ? formatCurrency(an.target, selectedAsset.exchange) : 'N/A'}</span>
+                            </div>
+                            <div className="flex justify-between items-center">
+                              <span className={`font-bold px-2 py-1 rounded text-[10px] uppercase tracking-wider ${an.rating.includes('Buy') || an.rating.includes('Overweight') ? 'bg-success/20 text-success' : an.rating.includes('Sell') || an.rating.includes('Underweight') ? 'bg-danger/20 text-danger' : 'bg-muted text-muted-foreground'}`}>
+                                {an.rating}
+                              </span>
+                              <span className="text-muted-foreground text-[10px] font-semibold uppercase">{an.days_ago}d ago</span>
+                            </div>
+                          </div>
+                        ));
+                      })()
+                    ) : (
+                       <div className="text-muted-foreground text-sm italic">No detailed analyst data available.</div>
+                    )}
+                  </div>
+                  {!showOlderAnalysts && selectedAsset.analysts && selectedAsset.analysts.some(an => an.days_ago != null && an.days_ago > 31) && (
+                    <button onClick={() => setShowOlderAnalysts(true)} className="text-xs text-primary font-semibold hover:underline cursor-pointer self-start">Display previous data</button>
                   )}
                 </div>
               </div>
@@ -681,7 +717,7 @@ function App() {
                       {/* Median */}
                       <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center" style={{ left: getPos(median) }}>
                         <div className="absolute bottom-full mb-8 flex flex-col items-center">
-                          <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap mb-1">Median: ${median.toFixed(2)}</span>
+                          <span className="text-xs font-semibold text-muted-foreground whitespace-nowrap mb-1">Median: {formatCurrency(median, selectedAsset.exchange)}</span>
                           <div className="h-6 w-px bg-muted-foreground/50"></div>
                         </div>
                         <div className="w-1.5 h-1.5 bg-muted-foreground rounded-full z-10"></div>
@@ -690,7 +726,7 @@ function App() {
                       {/* Average */}
                       <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center z-10" style={{ left: getPos(average) }}>
                         <div className="absolute bottom-full mb-1 flex flex-col items-center">
-                          <span className="text-sm font-bold text-foreground whitespace-nowrap mb-1">Average: ${average.toFixed(2)}</span>
+                          <span className="text-sm font-bold text-foreground whitespace-nowrap mb-1">Average: {formatCurrency(average, selectedAsset.exchange)}</span>
                           <div className="h-4 w-px bg-foreground"></div>
                         </div>
                         <div className="w-2 h-2 bg-background border-[1.5px] border-foreground rounded-full"></div>
@@ -699,20 +735,20 @@ function App() {
                       {/* Low */}
                       <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center" style={{ left: getPos(low) }}>
                         <div className="w-2 h-2 bg-muted-foreground/50 rounded-full"></div>
-                        <span className="absolute top-full mt-2 text-xs text-muted-foreground font-semibold whitespace-nowrap">Low: ${low.toFixed(2)}</span>
+                        <span className="absolute top-full mt-2 text-xs text-muted-foreground font-semibold whitespace-nowrap">Low: {formatCurrency(low, selectedAsset.exchange)}</span>
                       </div>
 
                       {/* High */}
                       <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center" style={{ left: getPos(high) }}>
                         <div className="w-2 h-2 bg-muted-foreground/50 rounded-full"></div>
-                        <span className="absolute top-full mt-2 text-xs text-muted-foreground font-semibold whitespace-nowrap">High: ${high.toFixed(2)}</span>
+                        <span className="absolute top-full mt-2 text-xs text-muted-foreground font-semibold whitespace-nowrap">High: {formatCurrency(high, selectedAsset.exchange)}</span>
                       </div>
 
                       {/* Current */}
                       <div className="absolute top-1/2 -translate-y-1/2 flex flex-col items-center z-20" style={{ left: getPos(current) }}>
                         <div className="absolute top-full mt-1 flex flex-col items-center">
                           <div className="h-5 w-px bg-primary/50 mb-1"></div>
-                          <span className="text-sm font-bold text-primary whitespace-nowrap bg-primary/10 px-2 py-0.5 rounded border border-primary/20 shadow-sm">Current: ${current.toFixed(2)}</span>
+                          <span className="text-sm font-bold text-primary whitespace-nowrap bg-primary/10 px-2 py-0.5 rounded border border-primary/20 shadow-sm">Current: {formatCurrency(current, selectedAsset.exchange)}</span>
                         </div>
                         <div className="w-3 h-3 bg-primary rounded-full shadow-[0_0_8px_rgba(255,255,255,0.6)] ring-2 ring-background"></div>
                       </div>
@@ -720,6 +756,10 @@ function App() {
                   </div>
                 );
               })()}
+              
+              <div className="mt-8 pt-6 pb-2 border-t border-border/50 text-xs text-muted-foreground/70 leading-relaxed bg-card rounded-b-lg">
+                <span className="font-semibold text-muted-foreground">Please Notice:</span> The <span className="font-semibold">Consensus Target</span> is a live, mathematically aggregated average of all analysts currently covering the stock. The <span className="font-semibold">Analyst Ratings</span> list above is a historical log of when analysts formally changed their stance. Since many analysts quietly reiterate targets without issuing formal upgrades, this historical list can be months or years out of date.
+              </div>
               
             </div>
           </div>

@@ -9,4 +9,13 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    proxy: {
+      "/api": {
+        target: "https://me-west1-valuegap-43872.cloudfunctions.net",
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+  },
 });

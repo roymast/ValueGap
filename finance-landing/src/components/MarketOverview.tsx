@@ -4,6 +4,15 @@ import { StockIcon } from './StockIcon';
 
 export const MarketOverview = ({ assets, onSelectAsset }: { assets: any[], onSelectAsset: (asset: any) => void }) => {
   if (!assets || assets.length === 0) return null;
+
+  const formatCurrency = (value: number | null | undefined, exchange?: string) => {
+    if (value == null) return "N/A";
+    let currency = "USD";
+    if (exchange === "TASE") currency = "ILS";
+    else if (exchange && ['LSE', 'LSE_BULL'].includes(exchange)) currency = "GBP";
+    else if (exchange && ['XETR', 'FWB'].includes(exchange)) currency = "EUR";
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(value);
+  };
   
   // Pick some major ones for the overview
   const majorTickers = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'BTC-USD'];
@@ -30,7 +39,7 @@ export const MarketOverview = ({ assets, onSelectAsset }: { assets: any[], onSel
               <div className="flex items-center gap-2">
                 <StockIcon ticker={asset.ticker} name={asset.company_name} className="w-8 h-8" />
                 <div>
-                  <h3 className="font-bold text-foreground text-sm">{asset.ticker}</h3>
+                  <h3 className="font-bold text-foreground text-sm">{asset.ticker} <span className="text-[10px] text-muted-foreground font-normal ml-1">({asset.exchange || 'Unknown'})</span></h3>
                   <p className="text-muted-foreground text-[10px] truncate max-w-[80px]">{asset.company_name}</p>
                 </div>
               </div>
@@ -38,9 +47,9 @@ export const MarketOverview = ({ assets, onSelectAsset }: { assets: any[], onSel
             </div>
             
             <div className="flex items-baseline gap-2 mt-2">
-              <span className="text-lg font-mono font-bold text-foreground">{lastPrice.toFixed(2)}</span>
+              <span className="text-lg font-mono font-bold text-foreground">{formatCurrency(lastPrice, asset.exchange)}</span>
               <span className={`text-xs font-mono font-bold ${isGreen ? 'text-success' : 'text-danger'}`}>
-                {isGreen ? '+' : ''}{delta.toFixed(2)} ({isGreen ? '+' : ''}{deltaPct.toFixed(2)}%)
+                {isGreen ? '+' : ''}{formatCurrency(delta, asset.exchange)} ({isGreen ? '+' : ''}{deltaPct.toFixed(2)}%)
               </span>
             </div>
           </div>

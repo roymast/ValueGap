@@ -1,9 +1,13 @@
 import React, { useRef, useState, useEffect, useMemo } from 'react';
 import { BarChart2, TrendingUp, Activity } from 'lucide-react';
 
-const formatCurrency = (value: number | null | undefined) => {
+const formatCurrency = (value: number | null | undefined, exchange?: string) => {
   if (value == null) return "N/A";
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
+  let currency = "USD";
+  if (exchange === "TASE") currency = "ILS";
+  else if (exchange && ['LSE', 'LSE_BULL'].includes(exchange)) currency = "GBP";
+  else if (exchange && ['XETR', 'FWB'].includes(exchange)) currency = "EUR";
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(value);
 };
 
 function useChartSettings() {
@@ -233,7 +237,7 @@ export const InteractiveChart = ({ asset, timeframe, showAxes = false, hideTitle
         <>
           <div className="absolute w-[6px] h-[6px] rounded-full border-[1.5px] bg-background transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" style={{ left: `${x1}%`, top: `${y1}%`, borderColor: color }} />
           <div className={`absolute text-[10px] font-mono font-bold text-foreground bg-background/80 px-1 rounded pointer-events-none -translate-y-1/2 ${x1 > 50 ? '-translate-x-full ml-[-8px]' : 'ml-[8px]'}`} style={{ left: `${x1}%`, top: `${Math.max(5, y1)}%` }}>
-            {formatCurrency(history[actualStartIdx])}
+            {formatCurrency(history[actualStartIdx], asset.exchange)}
           </div>
         </>
       );
@@ -250,7 +254,7 @@ export const InteractiveChart = ({ asset, timeframe, showAxes = false, hideTitle
       
       const deltaVal = val2 - val1;
       const deltaPct = (deltaVal / val1) * 100;
-      const deltaStr = `${deltaVal >= 0 ? '+' : ''}${formatCurrency(deltaVal)} (${deltaVal >= 0 ? '+' : ''}${deltaPct.toFixed(2)}%)`;
+      const deltaStr = `${deltaVal >= 0 ? '+' : ''}${formatCurrency(deltaVal, asset.exchange)} (${deltaVal >= 0 ? '+' : ''}${deltaPct.toFixed(2)}%)`;
       
       iSvgElements = (
         <g style={{ pointerEvents: 'none' }}>
@@ -265,12 +269,12 @@ export const InteractiveChart = ({ asset, timeframe, showAxes = false, hideTitle
         <>
           <div className="absolute w-[6px] h-[6px] rounded-full border-[1.5px] bg-background transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" style={{ left: `${x1}%`, top: `${y1}%`, borderColor: color }} />
           <div className={`absolute text-[10px] font-mono font-bold text-foreground bg-background/80 px-1 rounded pointer-events-none -translate-y-1/2 ${x1 > 50 ? '-translate-x-full ml-[-8px]' : 'ml-[8px]'}`} style={{ left: `${x1}%`, top: `${Math.max(5, y1)}%` }}>
-            {formatCurrency(val1)}
+            {formatCurrency(val1, asset.exchange)}
           </div>
           
           <div className="absolute w-[6px] h-[6px] rounded-full border-[1.5px] bg-background transform -translate-x-1/2 -translate-y-1/2 pointer-events-none" style={{ left: `${x2}%`, top: `${y2}%`, borderColor: color }} />
           <div className={`absolute text-[10px] font-mono font-bold text-foreground bg-background/80 px-1 rounded pointer-events-none -translate-y-1/2 ${x2 > 50 ? '-translate-x-full ml-[-8px]' : 'ml-[8px]'}`} style={{ left: `${x2}%`, top: `${Math.max(5, y2)}%` }}>
-            {formatCurrency(val2)}
+            {formatCurrency(val2, asset.exchange)}
           </div>
           
           <div className={`absolute font-mono font-bold text-[11px] px-2 py-0.5 rounded-full border border-border bg-background transform -translate-x-1/2 -translate-y-1/2 pointer-events-none ${textFillClass}`} style={{ left: `${x1 + (x2 - x1)/2}%`, top: `${H/2}%` }}>
@@ -309,7 +313,7 @@ export const InteractiveChart = ({ asset, timeframe, showAxes = false, hideTitle
 
   const overallDelta = lastPrice - firstPrice;
   const overallDeltaPct = (overallDelta / firstPrice) * 100;
-  const overallDeltaStr = `${overallDelta >= 0 ? '+' : ''}${formatCurrency(overallDelta)} (${overallDelta >= 0 ? '+' : ''}${overallDeltaPct.toFixed(2)}%)`;
+  const overallDeltaStr = `${overallDelta >= 0 ? '+' : ''}${formatCurrency(overallDelta, asset.exchange)} (${overallDelta >= 0 ? '+' : ''}${overallDeltaPct.toFixed(2)}%)`;
 
   const candleW = (W / (history.length || 1)) * 0.6; // 60% of available space
 
