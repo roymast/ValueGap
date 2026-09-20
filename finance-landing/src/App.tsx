@@ -1,10 +1,13 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { TrendingUp, TrendingDown, Search, FileText, X, Sun, Moon } from 'lucide-react';
+import { Routes, Route, NavLink } from 'react-router-dom';
 import { InteractiveChart } from './components/InteractiveChart';
 import { MarketOverview } from './components/MarketOverview';
 import { TopMovers } from './components/TopMovers';
 import { StockIcon } from './components/StockIcon';
 import { Sparkline } from './components/Sparkline';
+import { CardSkeleton, TableRowSkeleton, OverviewSkeleton, TopMoverSkeleton, ChartSkeleton } from './components/Skeletons';
+import { useStore } from './store/useStore';
 
 interface Analyst {
   firm: string;
@@ -46,48 +49,14 @@ function App() {
   const [error, setError] = useState<string | null>(null);
   const [assetTypeFilter, setAssetTypeFilter] = useState<'all'|'stock'|'index'>('all');
   const [activeTab, setActiveTab] = useState<'undervalued'|'overvalued'>('undervalued');
-  const [theme, setTheme] = useState('dark'); // Default to dark for TradingView style
   
-  const [watchlist, setWatchlist] = useState<Asset[]>(() => {
-    try {
-      const saved = localStorage.getItem('finance_watchlist');
-      return saved ? JSON.parse(saved) : [];
-    } catch {
-      return [];
-    }
-  });
+  const { theme, setTheme, watchlist, toggleWatchlist: storeToggleWatchlist } = useStore();
 
-  useEffect(() => {
-    localStorage.setItem('finance_watchlist', JSON.stringify(watchlist));
-  }, [watchlist]);
-
-  const [currentScreen, setCurrentScreen] = useState<'home' | 'screener' | 'watchlist'>('home');
   const [chartTimeframe, setChartTimeframe] = useState<'1d' | '1mo' | '1y' | '5y'>('1d');
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [showOlderAnalysts, setShowOlderAnalysts] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
   const fetchedHistoryRef = useRef<Set<string>>(new Set());
-
-  const selectedAssetRef = useRef(selectedAsset);
-  selectedAssetRef.current = selectedAsset;
-  const currentScreenRef = useRef(currentScreen);
-  currentScreenRef.current = currentScreen;
-
-  useEffect(() => {
-    window.history.pushState({ appState: 'home' }, '');
-    const handlePopState = () => {
-      if (selectedAssetRef.current) {
-        setSelectedAsset(null);
-        window.history.pushState({ appState: 'home' }, '');
-      } else if (currentScreenRef.current !== 'home') {
-        setCurrentScreen('home');
-        document.getElementById('screen-home')?.scrollIntoView({ behavior: 'smooth' });
-        window.history.pushState({ appState: 'home' }, '');
-      }
-    };
-    window.addEventListener('popstate', handlePopState);
-    return () => window.removeEventListener('popstate', handlePopState);
-  }, []);
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -167,12 +136,14 @@ function App() {
 
   const formatCurrency = (value: number | null | undefined, exchange?: string) => {
     if (value == null) return "N/A";
+    if (value === 0) return "Data Unavailable";
     const currency = getCurrencyCode(exchange);
     return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(value);
   };
 
   const formatDelta = (value: number | null | undefined, isPercent: boolean | 'pct' | 'usd' | 'pts' = false) => {
     if (value == null) return "N/A";
+    if (value === 0 && !isPercent) return "0.00";
     const sign = value > 0 ? '+' : '';
     
     const type = isPercent === true ? 'pct' : isPercent === false ? 'usd' : isPercent;
@@ -180,13 +151,15 @@ function App() {
     let num = '';
     if (type === 'pct') num = `${value.toFixed(1)}%`;
     else if (type === 'pts') num = value.toFixed(2);
-    else num = formatCurrency(value, typeof isPercent === 'string' ? undefined : undefined); // When not passing exchange, defaults to USD, handled individually below
+    else num = formatCurrency(value, undefined);
     
     return `${sign}${num}`;
   };
 
   const formatDeltaWithExchange = (value: number | null | undefined, isPercent: boolean | 'pct' | 'usd' | 'pts' = false, exchange?: string) => {
     if (value == null) return "N/A";
+    const currency = getCurrencyCode(exchange);
+    if (value === 0 && (!isPercent || isPercent === 'usd')) return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(0);
     const sign = value > 0 ? '+' : '';
     
     const type = isPercent === true ? 'pct' : isPercent === false ? 'usd' : isPercent;
@@ -199,8 +172,9 @@ function App() {
     return `${sign}${num}`;
   };
 
-  const filterAssets = (assets: Asset[]) => {
+  const filterAssets = (assets: Asset[], applySearchAndFilters: boolean = true) => {
     return assets.filter(asset => {
+      if (!applySearchAndFilters) return true;
       const searchLower = search.toLowerCase();
       const matchesSearch = (asset.ticker && asset.ticker.toLowerCase().includes(searchLower)) ||
                             (asset.name && asset.name.toLowerCase().includes(searchLower));
@@ -213,22 +187,27 @@ function App() {
     });
   };
 
-  const currentUndervalued = filterAssets(undervalued);
-  const currentOvervalued = filterAssets(overvalued);
+  const currentUndervalued = filterAssets(undervalued, true);
+  const currentOvervalued = filterAssets(overvalued, true);
+  
+  // Home page uses unfiltered but sorted assets
+  const homeUndervalued = filterAssets(undervalued, false);
+  const homeOvervalued = filterAssets(overvalued, false);
+  
   const allAssets = [...undervalued, ...overvalued];
   
   // Create a unique set of assets for the movers/overview based on the ticker
   const uniqueAssets = Array.from(new Map(allAssets.map(item => [item.ticker, item])).values());
 
   useEffect(() => {
-    const allUnique = Array.from(new Map([...currentUndervalued, ...currentOvervalued].map(a => [a.ticker, a])).values());
+    const allUnique = Array.from(new Map([...homeUndervalued, ...homeOvervalued].map(a => [a.ticker, a])).values());
     const majorTickers = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'BTC-USD'];
     const overviewAssets = allUnique.filter(a => majorTickers.includes(a.ticker)).slice(0, 4);
     if (overviewAssets.length === 0) {
       overviewAssets.push(...allUnique.slice(0, 4));
     }
     
-    const topAssets = [...currentUndervalued.slice(0, 3), ...currentOvervalued.slice(0, 3), ...overviewAssets];
+    const topAssets = [...homeUndervalued.slice(0, 3), ...homeOvervalued.slice(0, 3), ...overviewAssets];
     const uniqueTopAssets = Array.from(new Map(topAssets.map(a => [a.ticker, a])).values());
 
     uniqueTopAssets.forEach(asset => {
@@ -252,11 +231,7 @@ function App() {
 
   const toggleWatchlist = (asset: Asset, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (watchlist.find(a => a.ticker === asset.ticker)) {
-      setWatchlist(watchlist.filter(a => a.ticker !== asset.ticker));
-    } else {
-      setWatchlist([...watchlist, asset]);
-    }
+    storeToggleWatchlist(asset);
   };
 
   const renderChart = (asset: Asset, timeframe: string, showAxes = false, hideTitle = false) => {
@@ -279,11 +254,6 @@ function App() {
       </div>
     );
   };
-
-  const handleTouchStart = () => { if (loading) return; };
-  const handleTouchMove = () => { if (loading) return; };
-  const handleTouchEnd = () => { if (loading) return; };
-
   return (
     <div className="min-h-screen bg-background text-foreground font-sans selection:bg-primary/30 flex flex-col md:flex-row overflow-hidden h-screen">
       
@@ -292,56 +262,41 @@ function App() {
          <div className="w-10 h-10 bg-primary rounded-md flex items-center justify-center border border-primary/30 shadow-md">
             <TrendingUp className="text-primary-foreground w-5 h-5" />
          </div>
-         <a href="#screen-home" onClick={(e) => { if (loading) e.preventDefault(); else setCurrentScreen('home'); }} className={`p-3 rounded-lg transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${currentScreen === 'home' ? 'bg-secondary text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
+         <NavLink to="/" className={({isActive}) => `p-3 rounded-lg transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${isActive ? 'bg-secondary text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
             <TrendingUp className="w-6 h-6" />
-         </a>
-         <a href="#screen-screener" onClick={(e) => { if (loading) e.preventDefault(); else setCurrentScreen('screener'); }} className={`p-3 rounded-lg transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${currentScreen === 'screener' ? 'bg-secondary text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
+         </NavLink>
+         <NavLink to="/screener" className={({isActive}) => `p-3 rounded-lg transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${isActive ? 'bg-secondary text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
             <Search className="w-6 h-6" />
-         </a>
-         <a href="#screen-watchlist" onClick={(e) => { if (loading) e.preventDefault(); else setCurrentScreen('watchlist'); }} className={`p-3 rounded-lg transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${currentScreen === 'watchlist' ? 'bg-secondary text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
+         </NavLink>
+         <NavLink to="/watchlist" className={({isActive}) => `p-3 rounded-lg transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${isActive ? 'bg-secondary text-primary' : 'text-muted-foreground hover:bg-secondary hover:text-foreground'}`}>
             <FileText className="w-6 h-6" />
-         </a>
+         </NavLink>
       </div>
 
       {/* Main content area */}
-      <div className="flex-1 flex overflow-hidden relative">
+      <div className="flex-1 flex overflow-hidden relative w-full">
         <div 
-          className={`flex-1 flex ${loading ? 'overflow-hidden touch-none' : 'overflow-x-auto'} snap-x snap-mandatory hide-scrollbar relative scroll-smooth`}
-          onTouchStart={handleTouchStart}
-          onTouchMove={handleTouchMove}
-          onTouchEnd={handleTouchEnd}
-          onScroll={(e) => {
-            const target = e.currentTarget;
-            const scrollLeft = target.scrollLeft;
-            const width = target.clientWidth;
-            const index = Math.round(scrollLeft / width);
-            if (index === 0 && currentScreen !== 'home') setCurrentScreen('home');
-            else if (index === 1 && currentScreen !== 'screener') setCurrentScreen('screener');
-            else if (index === 2 && currentScreen !== 'watchlist') setCurrentScreen('watchlist');
-          }}
+          className={`flex-1 flex ${loading ? 'overflow-hidden touch-none' : 'overflow-x-auto'} hide-scrollbar relative w-full`}
         >
-          {loading && (
-            <div className="absolute inset-0 z-50 flex items-center justify-center bg-background/50 backdrop-blur-sm pointer-events-none">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary"></div>
-            </div>
-          )}
+          {/* Skeleton loading replaces the full-screen spinner */}
         
           {error && (
             <div className="absolute top-4 left-1/2 -translate-x-1/2 z-50 bg-danger/90 text-white px-4 py-2 rounded-lg shadow-lg">
               {error}
             </div>
           )}
-        
-        {/* Screen 1: Home/Dashboard */}
-        <div id="screen-home" className="w-full flex-shrink-0 snap-start h-full overflow-y-auto pb-24">
-          <header className="px-6 py-4 border-b border-border sticky top-0 bg-background/95 backdrop-blur-md z-50 flex justify-between items-center">
+
+          <Routes>
+            <Route path="/" element={
+              <div id="screen-home" className="w-full flex-shrink-0 h-full overflow-y-auto pb-24">
+                <header className="px-6 py-4 border-b border-border/50 sticky top-0 bg-background/80 glass-panel z-50 flex justify-between items-center transition-all duration-300">
             <div>
               <h1 className="text-xl font-black tracking-tight flex items-center gap-2">
                 <span className="text-foreground">VALUE<span className="text-primary">GAP</span></span>
               </h1>
             </div>
             <div className="flex gap-2">
-              <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="w-8 h-8 rounded-md border border-border flex items-center justify-center bg-card hover:bg-secondary transition-all" title="Toggle Theme">
+              <button onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')} className="w-8 h-8 rounded-md border border-border flex items-center justify-center bg-card hover:bg-secondary transition-all active:scale-95 shadow-sm" title="Toggle Theme">
                 {theme === 'dark' ? <Sun className="w-4 h-4 text-foreground" /> : <Moon className="w-4 h-4 text-foreground" />}
               </button>
             </div>
@@ -350,13 +305,24 @@ function App() {
           <div className="max-w-[1600px] mx-auto px-6 mt-6 space-y-6">
             
             {/* TradingView style market overview */}
-            <MarketOverview assets={uniqueAssets} onSelectAsset={fetchAndOpenDetail} />
+            {loading ? <OverviewSkeleton /> : <MarketOverview assets={uniqueAssets} onSelectAsset={fetchAndOpenDetail} />}
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
               
               {/* Left Column: Top Movers */}
               <div className="xl:col-span-1">
-                <TopMovers assets={uniqueAssets} onSelectAsset={fetchAndOpenDetail} />
+                {loading ? (
+                  <div className="bg-card rounded-xl border border-border p-4 shadow-sm flex flex-col gap-4">
+                    <div className="h-6 w-32 bg-muted rounded animate-pulse mb-2"></div>
+                    <TopMoverSkeleton />
+                    <TopMoverSkeleton />
+                    <TopMoverSkeleton />
+                    <TopMoverSkeleton />
+                    <TopMoverSkeleton />
+                  </div>
+                ) : (
+                  <TopMovers assets={uniqueAssets} onSelectAsset={fetchAndOpenDetail} />
+                )}
               </div>
 
               {/* Right Column: Opportunities */}
@@ -367,9 +333,16 @@ function App() {
                     <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Top Undervalued Opportunities</h2>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {currentUndervalued.slice(0, 3).map((asset) => (
-                      <div key={asset.ticker} onClick={() => fetchAndOpenDetail(asset)} className="bg-card border border-border p-4 rounded-lg cursor-pointer hover:border-primary/50 transition-colors shadow-sm flex flex-col justify-between min-h-[220px]">
-                        <div className="flex justify-between items-start">
+                    {loading ? (
+                      <>
+                        <CardSkeleton />
+                        <CardSkeleton />
+                        <CardSkeleton />
+                      </>
+                    ) : homeUndervalued.slice(0, 3).map((asset) => (
+                      <div key={asset.ticker} onClick={() => fetchAndOpenDetail(asset)} className="relative bg-card border border-border p-4 rounded-lg cursor-pointer hover:border-primary/50 transition-all shadow-sm flex flex-col justify-between min-h-[220px] hover:-translate-y-1 overflow-hidden group">
+                        <div className="absolute inset-0 bg-gradient-to-br from-success/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+                        <div className="flex justify-between items-start relative z-10">
                           <div className="flex items-center gap-2">
                             <StockIcon ticker={asset.ticker} name={asset.name} className="w-8 h-8" />
                             <div>
@@ -382,15 +355,15 @@ function App() {
                             <span className="text-[9px] text-muted-foreground font-bold uppercase mt-0.5 tracking-wider">Exp. Gain</span>
                           </div>
                         </div>
-                        <div className="flex-1 mt-4 relative">
+                        <div className="flex-1 mt-4 relative z-10">
                           {asset.realHistoryFetched ? renderChart(asset, '1d', false, true) : (
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
-                            </div>
+                            <ChartSkeleton />
                           )}
                           <div className="absolute inset-0 z-10 cursor-pointer"></div>
                         </div>
-                        {asset.realHistoryFetched && renderCardDeltaStr(asset, '1d')}
+                        <div className="relative z-10">
+                          {asset.realHistoryFetched && renderCardDeltaStr(asset, '1d')}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -402,9 +375,16 @@ function App() {
                     <h2 className="text-sm font-bold uppercase tracking-wider text-muted-foreground">Top Overvalued Warnings</h2>
                   </div>
                   <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {currentOvervalued.slice(0, 3).map((asset) => (
-                      <div key={asset.ticker} onClick={() => fetchAndOpenDetail(asset)} className="bg-card border border-border p-4 rounded-lg cursor-pointer hover:border-primary/50 transition-colors shadow-sm flex flex-col justify-between min-h-[220px]">
-                        <div className="flex justify-between items-start">
+                    {loading ? (
+                      <>
+                        <CardSkeleton />
+                        <CardSkeleton />
+                        <CardSkeleton />
+                      </>
+                    ) : homeOvervalued.slice(0, 3).map((asset) => (
+                      <div key={asset.ticker} onClick={() => fetchAndOpenDetail(asset)} className="relative bg-card border border-border p-4 rounded-lg cursor-pointer hover:border-primary/50 transition-all shadow-sm flex flex-col justify-between min-h-[220px] hover:-translate-y-1 overflow-hidden group">
+                        <div className="absolute inset-0 bg-gradient-to-br from-danger/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
+                        <div className="flex justify-between items-start relative z-10">
                           <div className="flex items-center gap-2">
                             <StockIcon ticker={asset.ticker} name={asset.name} className="w-8 h-8" />
                             <div>
@@ -417,15 +397,15 @@ function App() {
                             <span className="text-[9px] text-muted-foreground font-bold uppercase mt-0.5 tracking-wider">Exp. Drop</span>
                           </div>
                         </div>
-                        <div className="flex-1 mt-4 relative">
+                        <div className="flex-1 mt-4 relative z-10">
                           {asset.realHistoryFetched ? renderChart(asset, '1d', false, true) : (
-                            <div className="absolute inset-0 flex items-center justify-center">
-                              <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-primary"></div>
-                            </div>
+                            <ChartSkeleton />
                           )}
                           <div className="absolute inset-0 z-10 cursor-pointer"></div>
                         </div>
-                        {asset.realHistoryFetched && renderCardDeltaStr(asset, '1d')}
+                        <div className="relative z-10">
+                          {asset.realHistoryFetched && renderCardDeltaStr(asset, '1d')}
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -435,9 +415,11 @@ function App() {
             </div>
           </div>
         </div>
+        } />
         
         {/* Screen 2: Screener */}
-        <div id="screen-screener" className="w-full flex-shrink-0 snap-start h-full flex flex-col border-x border-border">
+        <Route path="/screener" element={
+        <div id="screen-screener" className="w-full flex-shrink-0 h-full flex flex-col pb-24 border-x border-border">
           <div className="bg-card z-10 px-6 py-4 border-b border-border flex-shrink-0 shadow-sm">
             <h2 className="text-xl font-bold mb-4 text-foreground">Screener</h2>
             
@@ -489,45 +471,60 @@ function App() {
                 </tr>
               </thead>
                 <tbody className="font-mono text-sm">
-                  {(activeTab === 'undervalued' ? currentUndervalued : currentOvervalued).map((asset) => (
-                    <tr key={asset.ticker} onClick={() => fetchAndOpenDetail(asset)} className="group cursor-pointer hover:bg-secondary/50 border-b border-border/50 transition-colors">
-                      <td className="py-2.5 px-4">
-                        <div className="flex items-center gap-3">
-                          <button onClick={(e) => toggleWatchlist(asset, e)} className="text-muted-foreground hover:text-primary transition-colors">
-                            <span className={`text-lg ${watchlist.find(a => a.ticker === asset.ticker) ? 'text-primary' : ''}`}>
-                              {watchlist.find(a => a.ticker === asset.ticker) ? '★' : '☆'}
-                            </span>
-                          </button>
-                          <StockIcon ticker={asset.ticker} name={asset.name} className="w-7 h-7" />
-                          <div>
-                            <div className="font-bold text-foreground font-sans text-sm leading-tight">{asset.ticker} <span className="text-[10px] text-muted-foreground font-normal ml-1">({asset.exchange || 'Unknown'})</span></div>
-                            <div className="text-[10px] text-muted-foreground font-sans line-clamp-1 max-w-[150px] leading-tight">{asset.name}</div>
+                  {loading ? (
+                    <>
+                      <TableRowSkeleton />
+                      <TableRowSkeleton />
+                      <TableRowSkeleton />
+                      <TableRowSkeleton />
+                      <TableRowSkeleton />
+                      <TableRowSkeleton />
+                      <TableRowSkeleton />
+                      <TableRowSkeleton />
+                    </>
+                  ) : (
+                    (activeTab === 'undervalued' ? currentUndervalued : currentOvervalued).map((asset) => (
+                      <tr key={asset.ticker} onClick={() => fetchAndOpenDetail(asset)} className="group cursor-pointer hover:bg-secondary/50 border-b border-border/50 transition-all hover:translate-x-1">
+                        <td className="py-2.5 px-4">
+                          <div className="flex items-center gap-3">
+                            <button onClick={(e) => toggleWatchlist(asset, e)} className="text-muted-foreground hover:text-primary transition-colors active:scale-95">
+                              <span className={`text-lg ${watchlist.find(a => a.ticker === asset.ticker) ? 'text-primary' : ''}`}>
+                                {watchlist.find(a => a.ticker === asset.ticker) ? '★' : '☆'}
+                              </span>
+                            </button>
+                            <StockIcon ticker={asset.ticker} name={asset.name} className="w-7 h-7" />
+                            <div>
+                              <div className="font-bold text-foreground font-sans text-sm leading-tight">{asset.ticker} <span className="text-[10px] text-muted-foreground font-normal ml-1">({asset.exchange || 'Unknown'})</span></div>
+                              <div className="text-[10px] text-muted-foreground font-sans line-clamp-1 max-w-[150px] leading-tight">{asset.name}</div>
+                            </div>
                           </div>
-                        </div>
-                      </td>
-                      <td className="py-2.5 px-4 text-right text-foreground font-semibold">
-                        {formatCurrency(asset.price, asset.exchange)}
-                      </td>
-                      <td className="py-2.5 px-4 text-right">
-                        <div className="flex justify-end pr-2">
-                           <Sparkline data={(asset.history_dict && asset.history_dict['1d']) || asset.history || []} width={50} height={20} />
-                        </div>
-                      </td>
-                      <td className={`py-2.5 px-4 text-right font-bold ${activeTab === 'undervalued' ? 'text-success' : 'text-danger'}`}>
-                        {formatDeltaWithExchange(unit === 'pct' ? asset.percentage : asset.delta, unit, asset.exchange)}
-                      </td>
-                      <td className="py-2.5 px-4 text-right text-muted-foreground font-semibold">
-                        {formatCurrency(asset.target, asset.exchange)}
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="py-2.5 px-4 text-right text-foreground font-semibold">
+                          {formatCurrency(asset.price, asset.exchange)}
+                        </td>
+                        <td className="py-2.5 px-4 text-right">
+                          <div className="flex justify-end pr-2">
+                             <Sparkline data={(asset.history_dict && asset.history_dict['1d']) || asset.history || []} width={50} height={20} />
+                          </div>
+                        </td>
+                        <td className={`py-2.5 px-4 text-right font-bold ${activeTab === 'undervalued' ? 'text-success' : 'text-danger'}`}>
+                          {formatDeltaWithExchange(unit === 'pct' ? asset.percentage : asset.delta, unit, asset.exchange)}
+                        </td>
+                        <td className="py-2.5 px-4 text-right text-muted-foreground font-semibold">
+                          {formatCurrency(asset.target, asset.exchange)}
+                        </td>
+                      </tr>
+                    ))
+                  )}
                 </tbody>
             </table>
           </div>
         </div>
+        } />
 
         {/* Screen 3: Watchlist */}
-        <div id="screen-watchlist" className="w-full flex-shrink-0 snap-start h-full overflow-y-auto pb-24">
+        <Route path="/watchlist" element={
+        <div id="screen-watchlist" className="w-full flex-shrink-0 h-full flex flex-col pb-24">
           <div className="sticky top-0 bg-card z-10 px-6 py-4 border-b border-border flex justify-between items-center shadow-sm">
             <h2 className="text-xl font-bold text-foreground">Watchlist</h2>
             <span className="text-xs text-muted-foreground font-semibold uppercase">{watchlist.length} Tracked</span>
@@ -575,12 +572,14 @@ function App() {
             )}
           </div>
         </div>
+        } />
+          </Routes>
       </div>
 
       {/* Screen 2.5: Detail Panel Overlay */}
       {selectedAsset && (
-        <div className="absolute inset-0 z-50 flex justify-end bg-background/80 backdrop-blur-sm transition-all">
-          <div className="w-full md:w-[700px] h-full bg-card border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right">
+        <div className="absolute inset-0 z-50 flex justify-end bg-background/80 glass-panel backdrop-blur-md transition-all">
+          <div className="w-full md:w-[700px] h-full bg-card/95 border-l border-border shadow-2xl flex flex-col animate-in slide-in-from-right duration-300">
             
             <div className="flex justify-between items-start border-b border-border/50 pb-4 px-6 pt-6 gap-4">
               <div className="flex-1 min-w-0 pr-4 flex items-center gap-4">
@@ -620,9 +619,7 @@ function App() {
                 </div>
                 <div className="h-72 w-full relative">
                   {historyLoading && (
-                    <div className="absolute inset-0 flex items-center justify-center z-10 bg-background/50 backdrop-blur-sm rounded-b-lg">
-                      <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
-                    </div>
+                    <ChartSkeleton />
                   )}
                   {renderChart(selectedAsset, chartTimeframe, true, true)}
                 </div>
@@ -769,18 +766,18 @@ function App() {
       {/* Bottom Navigation (mobile only) */}
       <div className="fixed bottom-0 left-0 right-0 bg-card border-t border-border z-40 pb-safe md:hidden">
         <div className="flex justify-around items-center h-[60px]">
-          <a href="#screen-home" onClick={(e) => { if (loading) e.preventDefault(); else setCurrentScreen('home'); }} className={`flex flex-col items-center gap-1 w-full h-full justify-center transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${currentScreen === 'home' ? 'text-primary' : 'text-muted-foreground'}`}>
+          <NavLink to="/" className={({isActive}) => `flex flex-col items-center gap-1 w-full h-full justify-center transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
             <TrendingUp className="w-5 h-5" />
             <span className="text-[10px] font-bold uppercase tracking-wider">Home</span>
-          </a>
-          <a href="#screen-screener" onClick={(e) => { if (loading) e.preventDefault(); else setCurrentScreen('screener'); }} className={`flex flex-col items-center gap-1 w-full h-full justify-center transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${currentScreen === 'screener' ? 'text-primary' : 'text-muted-foreground'}`}>
+          </NavLink>
+          <NavLink to="/screener" className={({isActive}) => `flex flex-col items-center gap-1 w-full h-full justify-center transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
             <Search className="w-5 h-5" />
             <span className="text-[10px] font-bold uppercase tracking-wider">Screener</span>
-          </a>
-          <a href="#screen-watchlist" onClick={(e) => { if (loading) e.preventDefault(); else setCurrentScreen('watchlist'); }} className={`flex flex-col items-center gap-1 w-full h-full justify-center transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${currentScreen === 'watchlist' ? 'text-primary' : 'text-muted-foreground'}`}>
+          </NavLink>
+          <NavLink to="/watchlist" className={({isActive}) => `flex flex-col items-center gap-1 w-full h-full justify-center transition-colors ${loading ? 'pointer-events-none opacity-50' : ''} ${isActive ? 'text-primary' : 'text-muted-foreground'}`}>
             <FileText className="w-5 h-5" />
             <span className="text-[10px] font-bold uppercase tracking-wider">Watchlist</span>
-          </a>
+          </NavLink>
         </div>
       </div>
       

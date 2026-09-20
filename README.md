@@ -21,17 +21,16 @@ ValueGap is a responsive, dark-mode financial dashboard that visualizes divergen
 
 ## Technology Stack
 
-- **HTML5**: Structured semantic layout.
-- **Tailwind CSS v4 (CDN)**: Premium typography, utility layouts, and responsive grids.
-- **Vanilla CSS (`styles.css`)**: Glassmorphism backdrop-filters, custom dynamic design tokens, theme overrides, scrollbar-color optimizations, and keyframe slide-over drawer animations.
-- **Vanilla JavaScript**: Lightweight state management, reactive filters, svg path calculators, and interactive events.
+### Frontend
+- **React 18**: Component-based UI rendering.
+- **Vite**: Fast, modern frontend build tool.
+- **Tailwind CSS v4**: Utility-first CSS framework for rapid styling.
+- **shadcn/ui**: Accessible and customizable UI components (Lucide React icons).
+- **Recharts**: For rendering historical target vs price line charts.
 
-## How to Run
-python3 -m uvicorn main:app --host 0.0.0.0 --port 3000
-
-Since ValueGap is a lightweight, zero-dependency client-side application, you can view it directly by:
-1. Double-clicking the [index.html](index.html) file to open it in your browser.
-2. Alternatively, running a simple HTTP dev server from the project directory:
-   ```bash
-   npx serve .
-   ```
+### Backend & Infrastructure
+- **Python / FastAPI**: Backend REST API serving data to the client.
+- **Firebase Functions (Python 2nd Gen)**: Serverless backend endpoints (including scheduled data scraping).
+- **Firestore**: NoSQL database holding dynamically updated analyst targets and mapping definitions.
+- **Firebase Hosting**: High-speed CDN for the static React application (`public/` directory).
+- **TradingView & Yahoo Finance**: Data sources for live market quotes, historical trends, and analyst recommendations.

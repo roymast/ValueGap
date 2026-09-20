@@ -53,21 +53,24 @@ def refresh_market_data(mappings: List[Dict[str, Any]]):
         import requests
         import asyncio
         
-        def fetch_region(region, limit):
+        def fetch_region(region, limit, asset_types=None, sort_by="market_cap_basic"):
             url = f"https://scanner.tradingview.com/{region}/scan"
             payload = {
                 "columns": ["name", "close", "Recommend.All", "exchange"],
-                "sort": {"sortBy": "market_cap_basic", "sortOrder": "desc"},
+                "sort": {"sortBy": sort_by, "sortOrder": "desc"},
                 "range": [0, limit]
             }
+            if asset_types:
+                payload["filter"] = [{"left": "type", "operation": "in_range", "right": asset_types}]
             res = requests.post(url, json=payload, timeout=5)
             return res.json().get("data", []) if res.status_code == 200 else []
             
         # Fetch both concurrently using thread pool if possible, or just sequentially since it's <1s
         am_data = fetch_region("america", 2500)
+        am_funds = fetch_region("america", 500, ["fund", "index"], sort_by="volume")
         il_data = fetch_region("israel", 1000)
         
-        for item in am_data + il_data:
+        for item in am_data + am_funds + il_data:
             cols = item.get("d", [])
             if len(cols) >= 4:
                 sym = cols[0]
@@ -119,6 +122,17 @@ def refresh_market_data(mappings: List[Dict[str, Any]]):
         if price == 0.0 and ticker in cache_data:
             price = cache_data[ticker]["price"]
             target = cache_data[ticker]["target"]
+            
+        # 2.5 Fallback to yfinance if price is STILL 0.0 (e.g. index funds not in top scanner results)
+        if price == 0.0:
+            try:
+                import yfinance as yf
+                yf_sym = m.get("yf_symbol", ticker)
+                fast_info = yf.Ticker(yf_sym).fast_info
+                if 'lastPrice' in fast_info and fast_info['lastPrice'] is not None:
+                    price = float(fast_info['lastPrice'])
+            except Exception as e:
+                print(f"yfinance fallback failed for {ticker}: {e}")
             
         # 4. Fallback logic for Targets
         if target is None or target == 0.0:
@@ -469,20 +483,36 @@ async def get_stock_history(ticker: str):
 
     def fetch_history():
         try:
-            t = yf.Ticker(ticker)
+            # Handle TASE stocks specially
+            query_ticker = ticker
+            exchange = cache_data.get(ticker, {}).get("exchange", "")
+            if exchange == "TASE" and not query_ticker.endswith(".TA"):
+                query_ticker = f"{ticker}.TA"
             
+            t = yf.Ticker(query_ticker)
+            
+            # Helper to fetch and optionally scale data
+            def get_hist(period, interval):
+                hist_raw = t.history(period=period, interval=interval)
+                if hist_raw.empty: return []
+                values = [float(v) for v in hist_raw["Close"].dropna().tolist()]
+                # If currency is ILA (Israel Agorot), divide by 100 to get ILS
+                try:
+                    if t.info.get("currency") == "ILA":
+                        values = [v / 100.0 for v in values]
+                except Exception:
+                    pass
+                return [round(v, 2) for v in values]
+                
             # Fetch 5y weekly data — covers 5y and 1y views
-            hist_5y_raw = t.history(period="5y", interval="1wk")
-            hist_5y = [round(float(v), 2) for v in hist_5y_raw["Close"].dropna().tolist()] if not hist_5y_raw.empty else []
+            hist_5y = get_hist("5y", "1wk")
             hist_1y = hist_5y[-52:] if len(hist_5y) >= 52 else hist_5y
             
             # Fetch 1mo daily data
-            hist_1mo_raw = t.history(period="1mo", interval="1d")
-            hist_1mo = [round(float(v), 2) for v in hist_1mo_raw["Close"].dropna().tolist()] if not hist_1mo_raw.empty else []
+            hist_1mo = get_hist("1mo", "1d")
             
             # Fetch 5d data for 1-day intraday-ish view
-            hist_1d_raw = t.history(period="5d", interval="15m")
-            hist_1d = [round(float(v), 2) for v in hist_1d_raw["Close"].dropna().tolist()] if not hist_1d_raw.empty else []
+            hist_1d = get_hist("5d", "15m")
             
             # Fetch real analysts
             real_analysts = []
