@@ -154,7 +154,7 @@ function App() {
   }, []);
 
   useEffect(() => {
-    const handlePopState = (e: PopStateEvent) => {
+    const handlePopState = () => {
       if (selectedAsset) {
         setSelectedAsset(null);
       }
