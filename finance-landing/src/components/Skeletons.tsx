@@ -89,3 +89,31 @@ export const ChartSkeleton = () => {
     </div>
   );
 };
+
+export const AnalystSkeleton = () => {
+  return (
+    <>
+      {[1, 2, 3].map(i => (
+        <div key={i} className="flex-none w-[280px] bg-card p-5 rounded-lg border border-border shadow-sm animate-pulse">
+          <div className="flex justify-between items-start mb-3">
+            <div className="h-4 w-24 bg-muted rounded"></div>
+            <div className="h-6 w-16 bg-muted rounded"></div>
+          </div>
+          <div className="flex justify-between items-center">
+            <div className="h-4 w-16 bg-muted rounded"></div>
+            <div className="h-3 w-12 bg-muted rounded"></div>
+          </div>
+        </div>
+      ))}
+    </>
+  );
+};
+
+export const PriceTargetSkeleton = () => {
+  return (
+    <div className="mt-8 mb-8 pt-4 px-4 animate-pulse">
+      <div className="h-4 w-40 bg-muted rounded mx-auto mb-2"></div>
+      <div className="relative w-full h-0.5 bg-muted rounded mt-20 mb-20"></div>
+    </div>
+  );
+};

@@ -12,7 +12,7 @@ export default defineConfig({
   server: {
     proxy: {
       "/api": {
-        target: "https://me-west1-valuegap-43872.cloudfunctions.net",
+        target: "https://api-y462ctg55q-zf.a.run.app",
         changeOrigin: true,
         secure: false,
       },

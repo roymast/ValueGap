@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { Sparkline } from './Sparkline';
 import { StockIcon } from './StockIcon';
 
-export const TopMovers = ({ assets, onSelectAsset }: { assets: any[], onSelectAsset: (a: any) => void }) => {
+export const TopMovers = ({ gainers = [], losers = [], onSelectAsset }: { gainers: any[], losers: any[], onSelectAsset: (a: any) => void }) => {
   const [tab, setTab] = useState<'gainers' | 'losers'>('gainers');
   
-  if (!assets || assets.length === 0) return null;
+  if (gainers.length === 0 && losers.length === 0) return null;
 
   const formatCurrency = (value: number | null | undefined, exchange?: string) => {
     if (value == null) return "N/A";
@@ -16,19 +16,19 @@ export const TopMovers = ({ assets, onSelectAsset }: { assets: any[], onSelectAs
     return new Intl.NumberFormat('en-US', { style: 'currency', currency }).format(value);
   };
 
-  // Calculate day change for all
-  const mapped = assets.map(a => {
-    const history = (a.history_dict && a.history_dict['1d']) || a.history || [];
-    const firstPrice = history.length > 0 ? history[0] : a.price;
+  // Map the pre-calculated arrays
+  const mapAssets = (list: any[]) => list.map(a => {
+    const history = (a.history_dict && a.history_dict['1d']) || a.history || a.history_list || [];
+    const firstPrice = history.length > 1 ? history[history.length - 2] : (history[0] || a.price); // match backend daily change logic
     const lastPrice = history.length > 0 ? history[history.length - 1] : a.price;
     const pct = firstPrice ? ((lastPrice - firstPrice) / firstPrice) * 100 : 0;
     return { ...a, pct, lastPrice, history };
   });
+
+  const mappedGainers = mapAssets(gainers);
+  const mappedLosers = mapAssets(losers);
   
-  const gainers = [...mapped].sort((a, b) => b.pct - a.pct).slice(0, 5);
-  const losers = [...mapped].sort((a, b) => a.pct - b.pct).slice(0, 5);
-  
-  const displayList = tab === 'gainers' ? gainers : losers;
+  const displayList = tab === 'gainers' ? mappedGainers : mappedLosers;
 
   return (
     <div className="bg-card border border-border rounded-lg p-4 flex flex-col h-full shadow-sm">

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TrendingUp, TrendingDown, Search, FileText, X, Sun, Moon } from 'lucide-react';
 import { Routes, Route, NavLink } from 'react-router-dom';
 import { InteractiveChart } from './components/InteractiveChart';
@@ -6,7 +6,7 @@ import { MarketOverview } from './components/MarketOverview';
 import { TopMovers } from './components/TopMovers';
 import { StockIcon } from './components/StockIcon';
 import { Sparkline } from './components/Sparkline';
-import { CardSkeleton, TableRowSkeleton, OverviewSkeleton, TopMoverSkeleton, ChartSkeleton } from './components/Skeletons';
+import { CardSkeleton, TableRowSkeleton, OverviewSkeleton, TopMoverSkeleton, ChartSkeleton, AnalystSkeleton, PriceTargetSkeleton } from './components/Skeletons';
 import { useStore } from './store/useStore';
 
 interface Analyst {
@@ -37,11 +37,18 @@ interface Asset {
   };
   realHistoryFetched?: boolean;
   successRate?: number;
+  flash?: 'up' | 'down';
 }
 
 function App() {
-  const [undervalued, setUndervalued] = useState<Asset[]>([]);
-  const [overvalued, setOvervalued] = useState<Asset[]>([]);
+  const [homeTopUnder, setHomeTopUnder] = useState<Asset[]>([]);
+  const [homeTopOver, setHomeTopOver] = useState<Asset[]>([]);
+  const [movers, setMovers] = useState<any>([]);
+  const [overviewAssets, setOverviewAssets] = useState<Asset[]>([]);
+  const [screenerUndervalued, setScreenerUndervalued] = useState<Asset[]>([]);
+  const [screenerOvervalued, setScreenerOvervalued] = useState<Asset[]>([]);
+  const [allGlobalAssets, setAllGlobalAssets] = useState<Asset[]>([]);
+  const [displayLimit, setDisplayLimit] = useState(30);
   const [search, setSearch] = useState('');
   const [minGap, setMinGap] = useState<number>(0);
   const [unit, setUnit] = useState<'pct'|'usd'|'pts'>('pct');
@@ -56,7 +63,6 @@ function App() {
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [showOlderAnalysts, setShowOlderAnalysts] = useState(false);
   const [historyLoading, setHistoryLoading] = useState(false);
-  const fetchedHistoryRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);
@@ -77,32 +83,108 @@ function App() {
     return () => { document.body.style.overflow = ''; };
   }, [selectedAsset]);
 
-  const fetchMarketData = async (force = false) => {
+  const fetchDashboardData = async () => {
     setLoading(true);
-    setError(null);
-    
     try {
-      const url = `/api/stocks?threshold=0${force ? '&force_refresh=true' : ''}`;
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error('Network response was not ok');
+      const res = await fetch(`/api/dashboard`);
+      if (res.ok) {
+        const data = await res.json();
+        
+        const processAssets = (assets: any[]) => assets.map(a => ({
+          ...a,
+          name: a.name || a.company_name,
+          history: a.history_list || a.history,
+          history_dict: a.history_dict || (a.history_list ? {'1mo': a.history_list, '1d': a.history_list, '1y': a.history_list, '5y': a.history_list} : undefined),
+          realHistoryFetched: !!a.history_list || !!a.history_dict
+        }));
+
+        setHomeTopUnder(processAssets(data.table_home?.undervalued || []));
+        setHomeTopOver(processAssets(data.table_home?.overvalued || []));
+        setMovers(data.table_movers || []);
+        setOverviewAssets(processAssets(data.table_overview || []));
+        console.log("Dashboard data fetched:", data);
       }
-      const data = await response.json();
-      setUndervalued(data.undervalued || []);
-      setOvervalued(data.overvalued || []);
-    } catch (err) {
-      console.error('Failed to load market data:', err);
-      setError('Failed to load market data. Please refresh.');
-    } finally {
       setLoading(false);
+    } catch (err) {
+      console.error("Dashboard fetch error:", err);
+      setError("Failed to load dashboard data");
+      setLoading(false);
+    }
+  };
+
+  const fetchGlobalAssets = async () => {
+    try {
+      console.log("Fetching global assets (screener & all)...");
+      const screenerRes = await fetch(`/api/screener`);
+      const processAssets = (assets: any[]) => assets.map(a => ({
+        ...a,
+        name: a.name || a.company_name,
+        history: a.history_list || a.history,
+        history_dict: a.history_dict || (a.history_list ? {'1mo': a.history_list, '1d': a.history_list, '1y': a.history_list, '5y': a.history_list} : undefined),
+        realHistoryFetched: !!a.history_list || !!a.history_dict
+      }));
+
+      if (screenerRes.ok) {
+        const sData = await screenerRes.json();
+        setScreenerUndervalued(processAssets(sData.undervalued || []));
+        setScreenerOvervalued(processAssets(sData.overvalued || []));
+      } else {
+        console.error("Failed to fetch screener data", screenerRes.status);
+      }
+      const allRes = await fetch(`/api/stocks`);
+      if (allRes.ok) {
+        const aData = await allRes.json();
+        let allAssets: Asset[] = [];
+        if (aData.table_all) allAssets = processAssets(aData.table_all);
+        else if (Array.isArray(aData)) allAssets = processAssets(aData);
+        else if (aData.undervalued && aData.overvalued) allAssets = [...processAssets(aData.undervalued), ...processAssets(aData.overvalued)];
+        
+        setAllGlobalAssets(allAssets);
+        console.log("Fetched allGlobalAssets count:", allAssets.length);
+      } else {
+        console.error("Failed to fetch all stocks data", allRes.status);
+      }
+    } catch (err) {
+      console.error("Global assets fetch error:", err);
+    }
+  };
+
+  useEffect(() => {
+    fetchDashboardData().then(fetchGlobalAssets);
+  }, []);
+
+  useEffect(() => {
+    const handlePopState = (e: PopStateEvent) => {
+      if (selectedAsset) {
+        setSelectedAsset(null);
+      }
+    };
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [selectedAsset]);
+
+  const closeDetailPanel = () => {
+    if (window.history.state?.detailPanelOpen) {
+      window.history.back();
+    } else {
+      setSelectedAsset(null);
     }
   };
 
   // Open detail panel and lazily fetch real history for this ticker
   const fetchAndOpenDetail = async (asset: Asset) => {
+    if (!selectedAsset) {
+      window.history.pushState({ detailPanelOpen: true }, '');
+    }
     setSelectedAsset(asset); // open immediately with synthetic history
     setShowOlderAnalysts(false);
     setChartTimeframe('1d');
+    
+    if (asset.realHistoryFetched) {
+      setHistoryLoading(false);
+      return;
+    }
+
     setHistoryLoading(true);
     try {
       const res = await fetch(`/api/stocks/history/${asset.ticker}`);
@@ -113,8 +195,10 @@ function App() {
           : prev
         );
         const updateAsset = (a: Asset) => a.ticker === asset.ticker ? { ...a, history_dict: data.history_dict, realHistoryFetched: true } : a;
-        setUndervalued(prev => prev.map(updateAsset));
-        setOvervalued(prev => prev.map(updateAsset));
+        setScreenerUndervalued(prev => prev.map(updateAsset));
+        setScreenerOvervalued(prev => prev.map(updateAsset));
+        setHomeTopUnder(prev => prev.map(updateAsset));
+        setHomeTopOver(prev => prev.map(updateAsset));
       }
     } catch (e) {
       console.error('Failed to fetch history:', e);
@@ -123,9 +207,7 @@ function App() {
     }
   };
 
-  useEffect(() => {
-    fetchMarketData();
-  }, []);
+
 
   const getCurrencyCode = (exchange?: string) => {
     if (exchange === "TASE") return "ILS";
@@ -187,47 +269,19 @@ function App() {
     });
   };
 
-  const currentUndervalued = filterAssets(undervalued, true);
-  const currentOvervalued = filterAssets(overvalued, true);
-  
-  // Home page uses unfiltered but sorted assets
-  const homeUndervalued = filterAssets(undervalued, false);
-  const homeOvervalued = filterAssets(overvalued, false);
-  
-  const allAssets = [...undervalued, ...overvalued];
-  
-  // Create a unique set of assets for the movers/overview based on the ticker
-  const uniqueAssets = Array.from(new Map(allAssets.map(item => [item.ticker, item])).values());
+  const isSearching = search.trim().length > 0;
+  const baseUndervalued = (isSearching || displayLimit > screenerUndervalued.length) && allGlobalAssets.length > 0
+    ? allGlobalAssets.filter(a => a.percentage > 0)
+    : screenerUndervalued;
+  const baseOvervalued = (isSearching || displayLimit > screenerOvervalued.length) && allGlobalAssets.length > 0
+    ? allGlobalAssets.filter(a => a.percentage <= 0)
+    : screenerOvervalued;
 
-  useEffect(() => {
-    const allUnique = Array.from(new Map([...homeUndervalued, ...homeOvervalued].map(a => [a.ticker, a])).values());
-    const majorTickers = ['AAPL', 'MSFT', 'NVDA', 'TSLA', 'SPY', 'BTC-USD'];
-    const overviewAssets = allUnique.filter(a => majorTickers.includes(a.ticker)).slice(0, 4);
-    if (overviewAssets.length === 0) {
-      overviewAssets.push(...allUnique.slice(0, 4));
-    }
-    
-    const topAssets = [...homeUndervalued.slice(0, 3), ...homeOvervalued.slice(0, 3), ...overviewAssets];
-    const uniqueTopAssets = Array.from(new Map(topAssets.map(a => [a.ticker, a])).values());
-
-    uniqueTopAssets.forEach(asset => {
-      if (!asset.realHistoryFetched && !fetchedHistoryRef.current.has(asset.ticker)) {
-        fetchedHistoryRef.current.add(asset.ticker);
-        fetch(`/api/stocks/history/${asset.ticker}`)
-          .then(res => res.json())
-          .then(data => {
-            const updateAsset = (a: Asset) => a.ticker === asset.ticker ? { ...a, history_dict: data.history_dict, realHistoryFetched: true } : a;
-            setUndervalued(prev => prev.map(updateAsset));
-            setOvervalued(prev => prev.map(updateAsset));
-            setSelectedAsset(prev => prev && prev.ticker === asset.ticker ? { ...prev, history_dict: data.history_dict, history: data.history_dict['1d'], analysts: (data.analysts?.length && data.analysts.some((a: Analyst) => a.target != null)) ? data.analysts : prev.analysts, realHistoryFetched: true } : prev);
-          })
-          .catch(e => {
-            console.error(e);
-            fetchedHistoryRef.current.delete(asset.ticker);
-          });
-      }
-    });
-  }, [currentUndervalued, currentOvervalued]);
+  const currentUndervalued = filterAssets(baseUndervalued, true);
+  const currentOvervalued = filterAssets(baseOvervalued, true);
+  
+  const homeUndervalued = homeTopUnder;
+  const homeOvervalued = homeTopOver;
 
   const toggleWatchlist = (asset: Asset, e: React.MouseEvent) => {
     e.stopPropagation();
@@ -305,7 +359,7 @@ function App() {
           <div className="max-w-[1600px] mx-auto px-6 mt-6 space-y-6">
             
             {/* TradingView style market overview */}
-            {loading ? <OverviewSkeleton /> : <MarketOverview assets={uniqueAssets} onSelectAsset={fetchAndOpenDetail} />}
+            {loading ? <OverviewSkeleton /> : <MarketOverview assets={overviewAssets.length > 0 ? overviewAssets : allGlobalAssets} onSelectAsset={fetchAndOpenDetail} />}
 
             <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
               
@@ -321,7 +375,7 @@ function App() {
                     <TopMoverSkeleton />
                   </div>
                 ) : (
-                  <TopMovers assets={uniqueAssets} onSelectAsset={fetchAndOpenDetail} />
+                  <TopMovers gainers={Array.isArray(movers) ? movers : (movers.gainers || [])} losers={Array.isArray(movers) ? [] : (movers.losers || [])} onSelectAsset={fetchAndOpenDetail} />
                 )}
               </div>
 
@@ -339,7 +393,7 @@ function App() {
                         <CardSkeleton />
                         <CardSkeleton />
                       </>
-                    ) : homeUndervalued.slice(0, 3).map((asset) => (
+                    ) : homeUndervalued.map((asset) => (
                       <div key={asset.ticker} onClick={() => fetchAndOpenDetail(asset)} className="relative bg-card border border-border p-4 rounded-lg cursor-pointer hover:border-primary/50 transition-all shadow-sm flex flex-col justify-between min-h-[220px] hover:-translate-y-1 overflow-hidden group">
                         <div className="absolute inset-0 bg-gradient-to-br from-success/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
                         <div className="flex justify-between items-start relative z-10">
@@ -381,7 +435,7 @@ function App() {
                         <CardSkeleton />
                         <CardSkeleton />
                       </>
-                    ) : homeOvervalued.slice(0, 3).map((asset) => (
+                    ) : homeOvervalued.map((asset) => (
                       <div key={asset.ticker} onClick={() => fetchAndOpenDetail(asset)} className="relative bg-card border border-border p-4 rounded-lg cursor-pointer hover:border-primary/50 transition-all shadow-sm flex flex-col justify-between min-h-[220px] hover:-translate-y-1 overflow-hidden group">
                         <div className="absolute inset-0 bg-gradient-to-br from-danger/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"></div>
                         <div className="flex justify-between items-start relative z-10">
@@ -459,7 +513,12 @@ function App() {
             </div>
           </div>
           
-          <div className="flex-1 overflow-auto px-6 py-4 pb-32">
+          <div className="flex-1 overflow-auto px-6 py-4 pb-32" onScroll={(e) => {
+            const target = e.target as HTMLDivElement;
+            if (target.scrollHeight - target.scrollTop <= target.clientHeight + 200) {
+              setDisplayLimit(prev => prev + 30);
+            }
+          }}>
             <table className="w-full text-left min-w-[600px] border-separate border-spacing-0 relative">
               <thead className="sticky top-0 bg-background z-20 shadow-sm border-b border-border">
                 <tr className="text-[10px] font-bold text-muted-foreground uppercase tracking-wider">
@@ -483,8 +542,8 @@ function App() {
                       <TableRowSkeleton />
                     </>
                   ) : (
-                    (activeTab === 'undervalued' ? currentUndervalued : currentOvervalued).map((asset) => (
-                      <tr key={asset.ticker} onClick={() => fetchAndOpenDetail(asset)} className="group cursor-pointer hover:bg-secondary/50 border-b border-border/50 transition-all hover:translate-x-1">
+                    (activeTab === 'undervalued' ? currentUndervalued : currentOvervalued).slice(0, displayLimit).map((asset) => (
+                      <tr key={asset.ticker} onClick={() => fetchAndOpenDetail(asset)} className={`group cursor-pointer border-b border-border/50 transition-all hover:translate-x-1 ${asset.flash === 'up' ? 'bg-success/30 duration-300' : asset.flash === 'down' ? 'bg-danger/30 duration-300' : 'hover:bg-secondary/50 duration-1000'}`}>
                         <td className="py-2.5 px-4">
                           <div className="flex items-center gap-3">
                             <button onClick={(e) => toggleWatchlist(asset, e)} className="text-muted-foreground hover:text-primary transition-colors active:scale-95">
@@ -592,7 +651,7 @@ function App() {
                 </div>
               </div>
               <div className="text-right flex flex-col items-end flex-shrink-0">
-                <button onClick={() => setSelectedAsset(null)} className="text-muted-foreground hover:text-foreground p-1 rounded-md mb-2 transition-colors"><X className="w-6 h-6"/></button>
+                <button onClick={closeDetailPanel} className="text-muted-foreground hover:text-foreground p-1 rounded-md mb-2 transition-colors"><X className="w-6 h-6"/></button>
                 <div className="text-2xl font-mono font-bold text-foreground">{formatCurrency(selectedAsset.price, selectedAsset.exchange)}</div>
                 <div className={`text-sm font-bold mt-1 ${selectedAsset.percentage >= 0 ? 'text-success' : 'text-danger'}`}>
                   {formatDelta(selectedAsset.percentage, true)} EXP. GAIN
@@ -618,10 +677,11 @@ function App() {
                   </div>
                 </div>
                 <div className="h-72 w-full relative">
-                  {historyLoading && (
+                  {historyLoading ? (
                     <ChartSkeleton />
+                  ) : (
+                    renderChart(selectedAsset, chartTimeframe, true, true)
                   )}
-                  {renderChart(selectedAsset, chartTimeframe, true, true)}
                 </div>
                 <div className="px-4 pb-4 pt-2">
                   {selectedAsset.realHistoryFetched && renderCardDeltaStr(selectedAsset, chartTimeframe)}
@@ -652,7 +712,9 @@ function App() {
                 </div>
                 <div className="flex flex-col gap-4 pb-6">
                   <div className="flex overflow-x-auto gap-4 scrollbar-thin">
-                    {selectedAsset.analysts && selectedAsset.analysts.length > 0 ? (
+                    {historyLoading ? (
+                      <AnalystSkeleton />
+                    ) : selectedAsset.analysts && selectedAsset.analysts.length > 0 ? (
                       (() => {
                         const visibleAnalysts = showOlderAnalysts ? selectedAsset.analysts : selectedAsset.analysts.filter(an => an.days_ago != null && an.days_ago <= 31);
                         if (visibleAnalysts.length === 0) return <div className="text-muted-foreground text-sm italic py-2">No recent analyst data available in the last 31 days.</div>;
@@ -682,7 +744,7 @@ function App() {
               </div>
 
               {/* Analyst Price Targets */}
-              {(() => {
+              {historyLoading ? <PriceTargetSkeleton /> : (() => {
                 if (!selectedAsset.analysts || selectedAsset.analysts.length === 0) return null;
                 const targets = selectedAsset.analysts.map(a => a.target).filter(t => t != null && !isNaN(t));
                 if (targets.length === 0) return null;
